@@ -1,0 +1,6 @@
+# One-off migration task. Select after dev or prod, for example: dev,migrate.
+spring:
+  main:
+    web-application-type: none
+  flyway:
+    enabled: true

@@ -1,0 +1,13 @@
+# Shared development environment. Credentials and issuer URLs come from deployment secrets/config.
+spring:
+  flyway:
+    enabled: false
+logging:
+  structured:
+    format:
+      console: ecs
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

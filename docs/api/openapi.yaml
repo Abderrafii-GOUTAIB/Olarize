@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Olarize API
+  version: 0.1.0
+paths:
+  /api/v1/me:
+    get:
+      operationId: getCurrentIdentity
+      summary: Return the authenticated external subject
+      description: Requires a Keycloak access token with the profile.read scope. Does not imply company membership or HR permissions.
+      security:
+        - keycloak: [profile.read]
+      responses:
+        '200':
+          description: Authenticated identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject]
+                additionalProperties: false
+                properties:
+                  subject: {type: string, minLength: 1}
+        '401':
+          description: Missing or invalid access token; includes WWW-Authenticate Bearer
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: Valid token without required scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+components:
+  securitySchemes:
+    keycloak:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: http://localhost:8081/realms/olarize/protocol/openid-connect/auth
+          tokenUrl: http://localhost:8081/realms/olarize/protocol/openid-connect/token
+          scopes:
+            profile.read: Read the authenticated subject
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, requestId]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        code: {type: string}
+        requestId: {type: string}

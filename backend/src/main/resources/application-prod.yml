@@ -1,0 +1,13 @@
+# Production uses the same runtime contract as dev; migrations run as a separate job.
+spring:
+  flyway:
+    enabled: false
+logging:
+  structured:
+    format:
+      console: ecs
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
