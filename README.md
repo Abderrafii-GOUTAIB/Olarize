@@ -11,7 +11,9 @@ Java 21 LTS, Spring Boot 4.1.1, Spring Security, Web MVC, Validation, Actuator, 
 ```text
 olarize/                             Existing folder may still be named hr ai system
   AGENTS.md                          Small pointer to development guidance
-  .agents/skills/                    Project-local Codex feature skill
+  .agents/skills/                    Story, implementation and review skills
+  .codex/agents/                     Project-local reviewer configuration
+  .githooks/                         Versioned pre-commit checks
   .instructions/                     All agent rules, business references and tasks
   .github/workflows/backend.yml      Backend verification pipeline
   backend/
@@ -107,3 +109,19 @@ See [Keycloak setup and endpoint guide](docs/authentication.md) and the [API con
 With the local profile, open [Swagger UI](http://localhost:8080/swagger-ui/index.html) or fetch `http://localhost:8080/v3/api-docs`. The Authorize button signs into the local Keycloak realm using PKCE; create a local user first as described in the authentication guide. Swagger is disabled outside the local profile. Local IDE runs bind to loopback; Docker publishes the backend on 127.0.0.1.
 
 Docker writes structured JSON logs to standard output; `docker compose logs --tail=100 backend` shows them. Each non-health request logs method, status, duration and request ID. Paths, queries, headers, bodies and tokens are not logged by the request filter. See [logging and debugging](docs/errors-and-debugging.md).
+
+## Interactive development studio
+
+The standalone [developer workbench](developer-workbench/README.md) lives outside the product frontend. It displays module discovery, story selection, implementation, verification, independent review and PR handoffs. Open `developer-workbench/index.html` or run:
+
+```sh
+python3 -m http.server 4178 --bind 127.0.0.1 --directory developer-workbench
+```
+
+Visit http://127.0.0.1:4178. It contains a local snapshot of employee stories and browser-local manual progress; it does not execute agents or synchronize Jira/GitHub.
+
+The connected development service is now available via `./developer-workbench/start.sh`. Open its private launch URL for live run controls, diff review and publication gates. Read [the connected workbench guide](developer-workbench/README.md) before enabling existing Codex login access. Static `index.html` remains the manual planner.
+
+## MVP customer-data direction
+
+The accepted target is managed hosting in Morocco, with a provider still to be chosen. Company isolation, restricted operations, private documents and verified backup recovery must be implemented and tested before real customer onboarding. The current MVP excludes external AI processing of employee/confidential company data; development agents and tests use synthetic data only. See [ADR 003](docs/decisions/003-mvp-data-protection-and-hosting.md) and the [security contract](.instructions/reference/security.md). This records the direction, not a claim that these protections are already deployed.

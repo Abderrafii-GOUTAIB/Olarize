@@ -69,3 +69,17 @@ Swagger UI is enabled in the local profile at http://localhost:8080/swagger-ui/i
 Docker console logs use Spring Boot's ECS JSON format. Inspect them with `docker compose logs --tail=100 backend`; the requestId field matches the X-Request-ID response header. Host IDE runs retain readable text logs. Request completion logs contain method, status and elapsed milliseconds, skip health polling, and omit request path, query, headers, body and token. Unexpected errors log an exception class and request ID. DEBUG stack traces are for local synthetic data only. Docker collects standard output locally; a shared deployment still needs a log collector, retention controls, alerts and restricted access.
 
 Verified on 2026-09-23: 37 backend tests passed from a clean build, including PostgreSQL/HTTP integration tests for authentication, local Swagger visibility, shared dev/prod profile isolation, mixed-profile safety, migration mode, and safe request logging. The backend Docker image built successfully and `docker compose config --quiet` passed. Live Docker checks from the earlier local setup confirmed Swagger HTML and assets, generated OAuth metadata, PKCE client settings, Keycloak browser CORS, and ECS JSON request logs with matching request IDs. No shared dev or production environment has been deployed.
+
+## Development agents and Git hooks
+
+Follow [the development workflow](../.instructions/development-workflow.md) for one-story implementation, independent review and fixes. Enable the project-local pre-commit hook once per clone:
+
+```sh
+./scripts/install-hooks.sh
+```
+
+The hook checks staged whitespace and conflict markers without changing files. Full tests remain in `./scripts/verify-backend.sh` and CI. The reviewer configuration is `.codex/agents/olarize-reviewer.toml`; it reviews using the existing `olarize-review` skill and returns findings to the developer. A fresh Codex task opened in this repository may be needed to discover the role.
+
+## Connected developer workbench
+
+Run `./developer-workbench/start.sh` and open its private local launch URL. Read [the workbench guide](../developer-workbench/README.md) for live execution prerequisites, approval gates and current limits. The original static planner remains separate. Verify this tool with `PYTHONDONTWRITEBYTECODE=1 python3 developer-workbench/service/test_workbench.py` and `node --check developer-workbench/connected.js`; these checks do not run Olarize HR features or publish external issues/PRs.

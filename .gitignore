@@ -15,3 +15,8 @@
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Local development workbench state and isolated workspaces
+/developer-workbench/.state/
+/.worktrees/
+**/__pycache__/

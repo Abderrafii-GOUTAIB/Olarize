@@ -1,6 +1,6 @@
 # Task 002 First authenticated AI workflow
 
-Status: authentication prerequisite implemented with Keycloak and GET /api/v1/me; company memberships and the AI workflow remain planned. Frontend foundation is still pending.
+Status: deferred product-AI task under ADR 003. Authentication prerequisite implemented with Keycloak and GET /api/v1/me; company memberships and the AI workflow remain planned. Frontend foundation is still pending. Do not start external processing of employee data under this historical task without a later explicit data-protection decision.
 
 ## Outcome
 

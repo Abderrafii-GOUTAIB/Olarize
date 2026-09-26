@@ -1,0 +1,26 @@
+name: Olarize development workbench
+on:
+  pull_request:
+    paths: ["developer-workbench/**", ".github/workflows/workbench.yml"]
+  push:
+    branches: [master, develop]
+    paths: ["developer-workbench/**", ".github/workflows/workbench.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Service unit and local HTTP integration tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 developer-workbench/service/test_workbench.py
+      - name: Check dashboard JavaScript syntax
+        run: |
+          node --check developer-workbench/connected.js
+          node --check developer-workbench/app.js
+          node --check developer-workbench/stories.js
+      - name: Dashboard interaction checks
+        run: node developer-workbench/test_connected.js
+      - name: Check whitespace
+        run: git diff --check

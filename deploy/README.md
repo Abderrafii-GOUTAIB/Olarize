@@ -1,6 +1,6 @@
 # Deployment contract (host-neutral)
 
-This directory defines how to run the tested backend image in a shared development or production environment. It does not provision infrastructure or deploy anything. Choose a hosting target later; keep the application image and database migration procedure the same.
+This directory defines how to run the tested backend image in a shared development or production environment. It does not provision infrastructure or deploy anything. Target managed hosting in Morocco under ADR 003; the provider is still to be selected and no production location has been verified. Keep the portable application image and database migration procedure. Real customer onboarding requires the data-location, isolation, access, recovery and legal-review gates in the security contract.
 
 | Concern | Shared dev | Production |
 |---|---|---|

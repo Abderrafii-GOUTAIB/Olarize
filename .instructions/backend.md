@@ -1,6 +1,6 @@
 # Spring Boot backend instructions
 
-Use Maven with its wrapper, a compatible Java LTS toolchain, Spring Boot, Spring Security, Spring Modulith, Spring Data JPA, Bean Validation and Flyway. Verify Spring AI compatibility during foundation work and integrate it in the first authenticated AI slice. Use deterministic provider stubs in ordinary tests. Select and pin a compatible release set from official documentation; do not guess latest versions.
+Use Maven with its wrapper, a compatible Java LTS toolchain, Spring Boot, Spring Security, Spring Modulith, Spring Data JPA, Bean Validation and Flyway. Treat product AI as deferred under ADR 003; do not add live external AI processing in the current backend-only phase. Use deterministic provider stubs in ordinary tests. Select and pin a compatible release set from official documentation; do not guess latest versions.
 
 ## Module structure
 
@@ -51,3 +51,7 @@ Introduce typed domain failures as real business cases appear. Keep any exceptio
 Document new HTTP endpoints in generated OpenAPI with accurate authentication, scopes, response types and errors. Keep Swagger UI local only; nonlocal profiles must disable and deny documentation routes unless a reviewed access policy explicitly changes this. Use the existing Springdoc 3.x integration with Spring Boot 4. Avoid describing unimplemented HR endpoints as working. If the checked-in reference YAML changes, keep it aligned with the generated contract.
 
 Use SLF4J and request IDs for operational diagnostics. Docker emits structured JSON to stdout; local host runs stay readable. Never log HR payloads, URLs with query data, bearer tokens, passwords or exception messages that may contain private data. Use bounded, low-cardinality fields for request completion. Keep audit events separate from diagnostic logs. Do not add logging frameworks or file appenders without a concrete need.
+
+## MVP company isolation
+
+Implement company ownership, trusted membership and application permissions together with PostgreSQL row-level security as defined in the security contract. Runtime database credentials must not own/bypass the protected tables; migrations use a separate role. Add integration tests with the actual restricted role, including missing tenant context and pooled-connection reuse. Foreign-key relationships and object-storage access must also preserve company scope. These are required safeguards to implement, not features already supplied by the existing database foundation.

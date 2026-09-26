@@ -1,4 +1,10 @@
-# AWS infrastructure instructions
+# MVP hosting and infrastructure instructions
+
+The accepted target is managed hosting in Morocco, with a provider still to be selected. Apply `docs/decisions/003-mvp-data-protection-and-hosting.md` and `.instructions/reference/security.md` before handling real customer data. Document actual processing/storage locations for the database, private object storage, Keycloak, logs and separate encrypted backups, plus support/subprocessor access. Require a tested restore procedure and named operations responsibilities. Do not assume that a provider's marketing label proves residency or that local hosting proves compliance.
+
+Use a portable application container, private PostgreSQL and private object storage. Do not provision AWS or assume Bedrock/S3/RDS as current MVP dependencies. The following AWS guidance is retained only for a separately approved future hosting alternative.
+
+## Conditional AWS alternative
 
 Use Terraform with separate environment configuration and protected remote state. Never place credentials or confidential Terraform state in Git. Use pinned provider versions and a lockfile. Plan first; apply only to an authorized account/environment. Code generation is not authorization to create billable infrastructure.
 

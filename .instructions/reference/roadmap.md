@@ -1,5 +1,7 @@
 # Business V1 ranked delivery plan
 
+Current-phase override: ADR 003 targets managed Moroccan hosting and deterministic backend development first; product AI/RAG is deferred for now and external AI processing of real employee/confidential company data is excluded from the initial MVP. This document preserves the longer-term vision and original sequence; it does not override that later accepted decision.
+
 Product validation and development inform one another. Interviews and pilot targets are tracked separately; they are not authorization for an agent to contact anyone. Build the primary conversational experience early, after its service and permission boundaries exist.
 
 | Rank | Delivery slice | Completion evidence |

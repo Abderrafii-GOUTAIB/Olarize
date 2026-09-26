@@ -1,5 +1,7 @@
 # Knowledge and RAG instructions
 
+Current MVP scope: product AI/RAG is deferred under ADR 003. This file guides future explicitly scoped work. Do not send real employee data or confidential company documents to external model/embedding providers in the initial MVP. See `.instructions/reference/security.md`.
+
 Own extraction, chunks, embeddings, index jobs and retrieval. The documents module owns original-file metadata, access grants, versions and publication authority. PostgreSQL/pgvector is the initial search store; Bedrock provides embedding inference through Spring AI.
 
 ## Ingestion lifecycle

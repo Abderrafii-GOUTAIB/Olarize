@@ -50,3 +50,7 @@ PostgreSQL stores authoritative business data; pgvector will store authorized po
 - notifications and audit: durable delivery and traceable business changes.
 
 These modules are planned, not empty generated implementations. Domain purity checks currently allow no domain classes; the rule becomes substantive as features are added.
+
+## Accepted MVP data and hosting direction
+
+[ADR 003](decisions/003-mvp-data-protection-and-hosting.md) targets managed Moroccan hosting for the MVP; no provider or production deployment is yet selected/verified. Keep the modular Spring backend, shared private PostgreSQL with application permissions plus row-level security to implement, private company-scoped document storage, separate Keycloak database and separate encrypted backups with verified locations. Product AI/RAG is deferred for the current phase. External AI processing of real employee/confidential company data is excluded initially. Development tools use synthetic data and have no production-data access. Earlier S3/Bedrock/AWS descriptions are future alternatives, not deployed components.

@@ -1,5 +1,7 @@
 # Assistant module instructions
 
+Current MVP scope: product AI/RAG is deferred under ADR 003. This file guides future explicitly scoped work. Do not send real employee data or confidential company documents to external model/embedding providers in the initial MVP. See `.instructions/reference/security.md`.
+
 Own conversations, orchestration limits, model adapters and action proposals. Do not own HR calculations or direct HR persistence. Depend on public HR and knowledge services. Keep the Bedrock adapter replaceable through a narrow application interface rather than leaking provider payloads into business modules.
 
 Deliver the assistant as the primary product interaction from the first authenticated read-only slice. Support live operational tools before document RAG is complete. Start with one assistant and bounded tool calling. Define maximum tool calls, tokens, duration and retries per request. Record model identifier, latency, usage and tool outcomes without default prompt logging. A provider timeout must not corrupt HR state.

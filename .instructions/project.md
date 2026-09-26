@@ -6,9 +6,9 @@ Build an AI-native HR operating system for Moroccan private companies with appro
 
 V1 includes employee records, contracts, attendance, leave and absences, HR documents, payroll preparation, CNSS, CIMR, employee self-service and the AI interface. Exclude public-sector HR, recruitment, performance/training management, automated discipline, autonomous dismissal or sensitive legal decisions, and a full proprietary gross-to-net payroll engine. CNSS/CIMR scope does not imply applicability to every employee or authority to submit/pay automatically.
 
-Read .instructions/reference/product-v1.md for requirements derived from the supplied business specification. Start with a small authorized read-only AI workflow, then deliver transactional HR and payroll workflows in vertical slices. AI must appear early, not only after a dashboard product is complete.
+Read .instructions/reference/product-v1.md for the longer-term business specification. The accepted MVP direction is recorded in docs/decisions/003-mvp-data-protection-and-hosting.md: build deterministic backend HR services first, target managed hosting in Morocco, and defer product AI/RAG for now. Do not send employee records or confidential company data to external AI providers. This supersedes earlier early-AI sequencing for the current phase without silently changing approved story acceptance criteria.
 
-Use React, TypeScript, Vite and MUI for the frontend. Use a Java LTS release, Spring Boot, Spring Security and Spring Modulith for one modular backend. Spring AI manages Bedrock calls and application-managed RAG. PostgreSQL owns business state; pgvector stores searchable policy passages and embeddings. Private S3 stores original documents. Keep the deployment portable. An AWS option uses ECS Fargate, RDS, CloudFront/S3, SES, Secrets Manager and CloudWatch; Keycloak is self-hosted with its own database and can run on another provider. Compare the full hosting and operations cost before deployment. See docs/architecture.md.
+Use React, TypeScript, Vite and MUI for the frontend. Use a Java LTS release, Spring Boot, Spring Security and Spring Modulith for one modular backend. PostgreSQL owns business state, with application authorization and row-level security planned for company isolation. Private object storage owns documents; Keycloak has a separate database. Keep the deployment portable and select a managed Moroccan hosting provider only after verifying data locations, backups, support access and subprocessors. No provider has been selected. Spring AI, Bedrock, pgvector retrieval and the earlier AWS deployment are future options, not active MVP dependencies. See docs/architecture.md and the security contract for production-data gates.
 
 Do not introduce microservices, a Python AI service, autonomous multi-agent coordination, Kubernetes, Kafka, Redis or a separate vector database unless a concrete requirement justifies the change. Record a material architecture change in docs/decisions. Routine implementation choices do not need another approval round.
 
@@ -17,7 +17,7 @@ Do not introduce microservices, a Python AI service, autonomous multi-agent coor
 1. Read the area-specific guidance selected by root AGENTS.md and the current task before editing.
 2. Inspect existing code and tests. Preserve user changes and existing conventions.
 3. Complete one small feature across the layers it requires. Avoid unrelated refactoring.
-4. Establish a tested business service, then expose it through a bounded AI tool and the necessary review UI in the same slice. Use deterministic model stubs before live-provider validation.
+4. Establish a tested deterministic business service and the interfaces required by the agreed story scope. Keep the current phase backend-only. Add product AI/RAG only through a later explicitly scoped decision satisfying the data-protection contract; synthetic stubs do not establish live-provider approval.
 5. Add meaningful tests for business behavior, authorization, transactions and failure cases.
 6. Run the documented checks appropriate to the change. Never invent successful results.
 7. Update the API contract, task status or operational documentation when behavior changes.
@@ -66,3 +66,7 @@ Development agents must apply SOLID during implementation and review:
 Use design patterns only when they solve an identified problem. Explain the problem and why the pattern is simpler to maintain than the direct alternative. Suitable examples include Strategy for genuinely varying policies, Adapter for external providers, and Factory for nontrivial construction. These are options, not a mandatory checklist. Reuse framework capabilities and existing project patterns before introducing another abstraction. Record material architectural choices in docs/decisions.
 
 Before completing a change, review responsibilities, dependency direction, interface size, substitutability, and whether every added pattern earns its complexity. Keep this review proportional to the change; tests must verify behavior rather than merely the presence of a pattern.
+
+## Feature delivery workflow
+
+For the current backend-only feature phase, follow `.instructions/development-workflow.md`: implement one approved story, verify it, delegate independent review, then resolve findings. The `olarize-feature` skill intentionally excludes product AI; this explicit phase and ADR 003 take precedence over the original AI-first roadmap. Development reviewer agents are separate from runtime HR AI architecture.

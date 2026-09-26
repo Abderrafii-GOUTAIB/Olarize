@@ -11,3 +11,13 @@ Managers access only authorized reports and decisions; attendance views reveal a
 Persist who changed what and when, with a reason and request correlation where relevant. Avoid secrets, health data, full prompts and document contents in telemetry. Set retention and deletion workflows for conversation text and derived indexes. Do not store medical attachments in a broadly accessible employee record.
 
 Secrets remain outside source and fixtures. Use IAM roles, TLS, encryption and restricted networking. Test backup recovery and access revocation. Flag unresolved customer hosting and international processing requirements before production activation; the architecture is not legal certification.
+
+## Accepted MVP customer-data boundary
+
+Follow ADR 003 in `docs/decisions/003-mvp-data-protection-and-hosting.md`. Managed Moroccan hosting is the target; a provider and verified data locations are still pending. Map business records, files, identity data, logs, backups, email/monitoring integrations, support access and subprocessors before promising residency. Local hosting alone is not a compliance claim.
+
+The initial MVP must not send employee records, personnel/payroll documents or confidential company information to external chat, model or embedding providers. Keep production credentials/connections/dumps and real HR documents out of coding agents, the developer workbench, Jira, GitHub and ordinary tests. Use synthetic data and separate environments. Do not assume that a policy document or embedding is anonymous.
+
+For company-owned PostgreSQL tables, reinforce application authorization with row-level security. Use a runtime role that is not a superuser, table owner or BYPASSRLS role; evaluate FORCE ROW LEVEL SECURITY for relevant owner access. Migration/backup privileges must be separate. Derive tenant context from verified membership, scope it to the transaction, and clear it on pooled-connection reuse; missing or invalid context denies access. Test cross-company reads, writes, joins, references, aggregates and background jobs using the actual runtime role. Database policies do not replace API/field permissions or storage authorization.
+
+Before real customer onboarding, require verified access controls, administrator MFA, safe logs, documented incident handling, a successful restore exercise, retention/export/deletion procedures and reviewed customer terms/applicable CNDP formalities. Document backup expiry rather than promising immediate erasure from all copies. Synthetic-data development need not wait for these production gates.
