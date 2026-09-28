@@ -1,6 +1,6 @@
 # Olarize
 
-AI-native HR for Moroccan private companies with approximately 20-200 employees. This repository currently contains the Spring Boot and Docker foundation. Keycloak authentication and GET /api/v1/me are implemented. ORG-001 company provisioning is available through a restricted administrative command; see [company provisioning](docs/company-provisioning.md). Employee workflows, frontend and AI integrations are not implemented yet.
+AI-native HR for Moroccan private companies with approximately 20-200 employees. This repository currently contains the Spring Boot and Docker foundation. Keycloak authentication and GET /api/v1/identity are implemented. ORG-001 company provisioning is available through a restricted administrative command; see [company provisioning](docs/company-provisioning.md). EMP-001 provides backend membership listing and trusted company-context APIs; no membership UI is implemented. Employee workflows, frontend and AI integrations are not implemented yet.
 
 ## Stack
 
@@ -28,7 +28,7 @@ olarize/                             Existing folder may still be named hr ai sy
         internal/web/                Error contract, request IDs, local API setup
       identity/
         package-info.java            Identity module boundary
-        internal/adapter/in/web/      Current-user endpoint and its API documentation
+        adapter/in/web/               HTTP controllers and API documentation
     src/main/resources/
       application.yml                Safe common configuration
       application-local.yml          Explicit local migration behavior
@@ -51,7 +51,9 @@ infra/keycloak/ contains the local realm import. The frontend implementation fol
 
 ## Clean code and clean architecture
 
-Use package-by-business-module, then separate public contracts, internal domain rules, application use cases and adapters as a feature requires them. `com.olarize` is the Java package prefix and contains only the application entry point; it is not a catch-all feature package. Dependency direction points toward the domain. Domain code must not import Spring, JPA, HTTP or AI providers. Use small cohesive classes, constructor injection, explicit types and meaningful business names. Avoid global utility/service classes and speculative abstractions.
+Use package-by-business-module, then separate public contracts, domain rules, application ports/services and adapters as a feature requires them. Name application service classes with the `Service` suffix. `com.olarize` is the Java package prefix and contains only the application entry point; it is not a catch-all feature package. Dependency direction points toward the domain. Domain code must not import Spring, JPA, HTTP or AI providers. Use small cohesive classes, constructor injection, explicit types and meaningful business names. Avoid global utility/service classes and speculative abstractions.
+
+Business modules follow `domain/{model,service,event,exception}`, `application/{port/in,port/out,service,command,query}`, and `adapter/{in/{web,messaging,cli},out/{persistence,messaging,external}}` when those folders are needed. We do not create empty folders. The current `identity` and `organization` source trees are examples.
 
 Controllers keep only HTTP mapping and input/output mapping annotations. Endpoint documentation lives beside the web adapter in local OpenAPI configuration; authentication rules remain in the security configuration. Do not add an interface or empty application/domain layer solely to hide annotations.
 
@@ -94,11 +96,11 @@ Tests use a separate disposable PostgreSQL/pgvector container. Do not bypass fai
 
 ## Security and current limits
 
-Health, liveness and readiness are public. The local profile also serves Swagger UI and generated OpenAPI. GET /api/v1/me requires a validated Keycloak access token and profile.read scope; other HR routes remain denied. Errors use sanitized problem responses and request correlation. Credentials remain in ignored .env, not source. Docker runs the backend as a non-root user and exposes local ports on loopback.
+Health, liveness and readiness are public. The local profile also serves Swagger UI and generated OpenAPI. GET /api/v1/identity requires a validated Keycloak access token and profile.read scope; other HR routes remain denied. Errors use sanitized problem responses and request correlation. Credentials remain in ignored .env, not source. Docker runs the backend as a non-root user and exposes local ports on loopback.
 
 Local Flyway enables the vector extension. Shared environments must run controlled migrations with separate privileges; startup migrations are disabled by default. A vector extension is not a working RAG pipeline. No frontend, payroll logic, CNSS/CIMR calculations or official integrations are claimed complete.
 
-Read [development](docs/development.md) for commands, troubleshooting and actual verification status. The next implementation contract is [.instructions/tasks/002-first-ai-workflow.md](.instructions/tasks/002-first-ai-workflow.md).
+See the visual [feature map and current flows](docs/features-and-flows.md) for what works today and how to check it. Read [development](docs/development.md) for commands, troubleshooting and actual verification status. The next implementation contract is [.instructions/tasks/002-first-ai-workflow.md](.instructions/tasks/002-first-ai-workflow.md).
 
 ## Authentication
 

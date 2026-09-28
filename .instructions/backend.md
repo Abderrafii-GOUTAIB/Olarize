@@ -6,7 +6,7 @@ Use Maven with its wrapper, a compatible Java LTS toolchain, Spring Boot, Spring
 
 Use package-by-business-module under com.olarize: identity, organization, employment, attendance, leave, payroll, socialprotection, documents, knowledge, assistant, notifications and audit. Create module implementations only as required by the active slice. Keep the application entry point above these packages.
 
-Expose deliberate public module APIs. Put implementation details in internal packages. Do not call another module's repository or import its internal entities. Use identifiers and module APIs rather than cross-module JPA object graphs. Keep shared types small; do not create a generic shared-service dumping ground. Add Spring Modulith verification for prohibited dependencies and cycles.
+Expose deliberate public module APIs from `application/port/in` when another module needs them. Keep each business module under its module package, organized as `domain/{model,service,event,exception}`, `application/{port/in,port/out,service,command,query}`, and `adapter/{in/{web,messaging,cli},out/{persistence,messaging,external}}` as needed. Name application services with a `Service` suffix. Create only folders that contain real code; do not call another module's repository or import its implementation classes. Use identifiers and module ports rather than cross-module JPA object graphs. Keep shared types small; do not create a generic shared-service dumping ground. Add Spring Modulith verification for prohibited dependencies and cycles.
 
 Controllers validate transport input and call application services. Application services establish trusted context and transaction boundaries. Domain logic implements explicit rules. Infrastructure adapters handle persistence and providers. Prefer clear code over layers containing only pass-through methods.
 
@@ -36,7 +36,7 @@ Use JUnit and Spring tests, Testcontainers PostgreSQL for database-sensitive beh
 
 ## Clean architecture and errors
 
-Follow the package layout in docs/architecture.md. Group code by business module, then separate its public API and internal domain, application and adapters. Domain code has no Spring, HTTP, JPA or AI dependencies. Application use cases depend on domain and explicit ports; adapters implement persistence/provider ports. Controllers map inputs/outputs. Add abstractions only where they protect a real boundary.
+Follow the package layout in docs/architecture.md. Group code by business module, then separate its public API, domain, application ports/services and adapters. Name application service classes with the `Service` suffix. Domain code has no Spring, HTTP, JPA or AI dependencies. Application services depend on domain and explicit ports; adapters implement persistence/provider ports. Controllers map inputs/outputs. Add abstractions only where they protect a real boundary; do not create unused event, mapper, repository or utility layers.
 
 Use the platform HTTP problem contract for controller and security failures. Domain failures map to HTTP only at the web adapter. Never expose exception messages, SQL, secrets or rejected values to clients. Keep request IDs through errors and clear logging context after each request. Shared platform infrastructure must not become a shared business-service layer. See docs/errors-and-debugging.md.
 
@@ -48,7 +48,7 @@ Introduce typed domain failures as real business cases appear. Keep any exceptio
 
 ## API documentation and operational logs
 
-Document new HTTP endpoints in generated OpenAPI with accurate authentication, scopes, response types and errors. Keep Swagger UI local only; nonlocal profiles must disable and deny documentation routes unless a reviewed access policy explicitly changes this. Use the existing Springdoc 3.x integration with Spring Boot 4. Avoid describing unimplemented HR endpoints as working. If the checked-in reference YAML changes, keep it aligned with the generated contract.
+Document every new HTTP endpoint in generated OpenAPI with a plain-language summary and description of the feature, returned data, authentication/scope requirements, selection behavior and meaningful errors. Give each response code an accurate explanation. Keep Swagger UI local only; nonlocal profiles must disable and deny documentation routes unless a reviewed access policy explicitly changes this. Use the existing Springdoc 3.x integration with Spring Boot 4. Avoid describing unimplemented HR endpoints as working. If the checked-in reference YAML changes, keep it aligned with the generated contract.
 
 Use SLF4J and request IDs for operational diagnostics. Docker emits structured JSON to stdout; local host runs stay readable. Never log HR payloads, URLs with query data, bearer tokens, passwords or exception messages that may contain private data. Use bounded, low-cardinality fields for request completion. Keep audit events separate from diagnostic logs. Do not add logging frameworks or file appenders without a concrete need.
 

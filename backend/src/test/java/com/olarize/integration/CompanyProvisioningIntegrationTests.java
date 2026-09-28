@@ -1,12 +1,12 @@
 package com.olarize.integration;
 
-import com.olarize.organization.api.CompanyLookup;
-import com.olarize.organization.api.CompanyReadAuthorization;
-import com.olarize.organization.internal.adapter.in.cli.ProvisionCompanyCommand;
-import com.olarize.organization.internal.adapter.out.persistence.JdbcCompanyLookup;
-import com.olarize.organization.internal.adapter.out.persistence.JdbcCompanyRegistrationStore;
-import com.olarize.organization.internal.domain.CompanyRegistration;
-import com.olarize.organization.internal.domain.RegistrationConflict;
+import com.olarize.organization.application.port.in.CompanyLookupPort;
+import com.olarize.organization.application.port.in.CompanyReadAuthorizationPort;
+import com.olarize.organization.adapter.in.cli.ProvisionCompanyCommand;
+import com.olarize.organization.adapter.out.persistence.CompanyLookupPersistenceAdapter;
+import com.olarize.organization.adapter.out.persistence.CompanyRegistrationPersistenceAdapter;
+import com.olarize.organization.domain.model.CompanyRegistration;
+import com.olarize.organization.domain.exception.RegistrationConflict;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.io.ByteArrayInputStream;
@@ -66,7 +66,7 @@ class CompanyProvisioningIntegrationTests {
         owner.execute("grant select on organization_company to web_runtime");
     }
 
-    JdbcCompanyRegistrationStore store(String user) { return new JdbcCompanyRegistrationStore(source(user)); }
+    CompanyRegistrationPersistenceAdapter store(String user) { return new CompanyRegistrationPersistenceAdapter(source(user)); }
     CompanyRegistration request(UUID key) { return new CompanyRegistration("شركة Synthetic", "Synthetic setup", key); }
 
     @Test void commandCreatesAuditedIdentityAndRetryReturnsOriginal() throws Exception {
@@ -123,7 +123,7 @@ class CompanyProvisioningIntegrationTests {
 
     @Test void ordinaryAndOwnerCredentialsCannotUseCommandAndRuntimeCannotWriteDirectly() {
         assertThatThrownBy(() -> store("web_runtime").register(request(UUID.randomUUID()), UUID.randomUUID())).isInstanceOf(SecurityException.class);
-        var privileged = new JdbcCompanyRegistrationStore(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
+        var privileged = new CompanyRegistrationPersistenceAdapter(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
         assertThatThrownBy(() -> privileged.register(request(UUID.randomUUID()), UUID.randomUUID())).isInstanceOf(SecurityException.class);
         var runtime = new JdbcTemplate(source("web_runtime"));
         assertThatThrownBy(() -> runtime.update("insert into organization_company(id,name,created_at,updated_at) values (?, 'Synthetic', now(), now())", UUID.randomUUID()))
@@ -158,7 +158,7 @@ class CompanyProvisioningIntegrationTests {
 
     @TestConfiguration(proxyBeanMethods = false)
     @EnableTransactionManagement
-    @Import(JdbcCompanyLookup.class)
+    @Import(CompanyLookupPersistenceAdapter.class)
     static class LookupConfiguration {
         @Bean JdbcTemplate jdbc(DataSource source) { return new JdbcTemplate(source); }
         @Bean PlatformTransactionManager transactions(DataSource source) { return new DataSourceTransactionManager(source); }
@@ -172,10 +172,10 @@ class CompanyProvisioningIntegrationTests {
         try (var pool = new HikariDataSource(config); var context = new AnnotationConfigApplicationContext()) {
             AtomicReference<UUID> authorized = new AtomicReference<>(a.id());
             context.registerBean(DataSource.class, () -> pool);
-            context.registerBean(CompanyReadAuthorization.class, () -> id -> id.equals(authorized.get()));
+            context.registerBean(CompanyReadAuthorizationPort.class, () -> id -> id.equals(authorized.get()));
             context.register(LookupConfiguration.class);
             context.refresh();
-            CompanyLookup lookup = context.getBean(CompanyLookup.class);
+            CompanyLookupPort lookup = context.getBean(CompanyLookupPort.class);
             assertThat(lookup.find(a.id())).contains(a);
             assertThat(lookup.find(b.id())).isEmpty();
             var jdbc = context.getBean(JdbcTemplate.class);
@@ -199,7 +199,7 @@ class CompanyProvisioningIntegrationTests {
             context.registerBean(DataSource.class, () -> source("web_runtime"));
             context.register(LookupConfiguration.class);
             context.refresh();
-            assertThat(context.getBean(CompanyLookup.class).find(UUID.randomUUID())).isEmpty();
+            assertThat(context.getBean(CompanyLookupPort.class).find(UUID.randomUUID())).isEmpty();
         }
     }
 }

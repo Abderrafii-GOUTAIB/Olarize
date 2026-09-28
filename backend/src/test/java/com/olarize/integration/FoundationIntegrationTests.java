@@ -96,7 +96,7 @@ class FoundationIntegrationTests {
     }
 
     @Test void privateRoutesAndOtherActuatorEndpointsAreDenied() throws Exception {
-        for (String path : new String[]{"/api/employees", "/actuator/env", "/actuator", "/login", "/v3/api-docs", "/swagger-ui/index.html"}) {
+        for (String path : new String[]{"/api/employees", "/api/v1/identity/memberships", "/api/v1/identity/company-context", "/actuator/env", "/actuator", "/login", "/v3/api-docs", "/swagger-ui/index.html"}) {
             var response = get(path);
             assertThat(response.statusCode()).as(path).isEqualTo(401);
             assertThat(response.headers().firstValue("content-type").orElse("")).contains("application/problem+json");
@@ -139,7 +139,7 @@ class FoundationIntegrationTests {
     }
 
     @Test void currentUserReturnsOnlyVerifiedSubject() throws Exception {
-        var response = authenticatedGet("/api/v1/me", token("valid"));
+        var response = authenticatedGet("/api/v1/identity", token("valid"));
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).isEqualTo("{\"subject\":\"user-123\"}");
         assertThat(response.headers().firstValue("cache-control").orElse("")).contains("no-store");
@@ -147,7 +147,7 @@ class FoundationIntegrationTests {
     }
 
     @Test void currentUserRequiresBearerAuthentication() throws Exception {
-        var response = get("/api/v1/me");
+        var response = get("/api/v1/identity");
         assertThat(response.statusCode()).isEqualTo(401);
         assertThat(response.headers().firstValue("www-authenticate")).contains("Bearer");
         assertThat(response.body()).contains("HTTP_401", "requestId");
@@ -156,14 +156,14 @@ class FoundationIntegrationTests {
     @ParameterizedTest
     @ValueSource(strings = {"issuer", "audience", "client", "id-token", "subject", "expiration", "expired", "not-before", "signature", "malformed"})
     void invalidTokensAreRejectedWithoutLeakingClaims(String variation) throws Exception {
-        var response = authenticatedGet("/api/v1/me", variation.equals("malformed") ? "not-a-jwt" : token(variation));
+        var response = authenticatedGet("/api/v1/identity", variation.equals("malformed") ? "not-a-jwt" : token(variation));
         assertThat(response.statusCode()).as(variation).isEqualTo(401);
         assertThat(response.headers().firstValue("content-type").orElse("")).contains("application/problem+json");
         assertThat(response.body()).contains("HTTP_401", "auth-test").doesNotContain("private@example.test", "user-123", "test-key");
     }
 
     @Test void validTokenWithoutScopeIsForbidden() throws Exception {
-        var response = authenticatedGet("/api/v1/me", token("scope"));
+        var response = authenticatedGet("/api/v1/identity", token("scope"));
         assertThat(response.statusCode()).isEqualTo(403);
         assertThat(response.body()).contains("HTTP_403", "auth-test");
     }
@@ -184,7 +184,7 @@ class FoundationIntegrationTests {
     }
 
     @Test void clientCannotSelectAnotherSubject() throws Exception {
-        assertThat(authenticatedGet("/api/v1/me?subject=other-user", token("valid")).body())
+        assertThat(authenticatedGet("/api/v1/identity?subject=other-user", token("valid")).body())
                 .isEqualTo("{\"subject\":\"user-123\"}");
     }
 

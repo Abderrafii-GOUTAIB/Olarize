@@ -41,6 +41,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
       KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
       KC_HEALTH_ENABLED: "true"
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8081}:8080"
     volumes:

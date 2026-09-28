@@ -18,11 +18,11 @@ The local realm uses sslRequired=none only for HTTP development. Never use that 
 
 ## Login contract
 
-The public client is olarize-web. Its local redirect URIs include the future frontend callback and Swagger UI at http://localhost:8080/swagger-ui/oauth2-redirect.html and http://127.0.0.1:8080/swagger-ui/oauth2-redirect.html. Keycloak permits these exact Swagger browser origins for the token exchange. Use authorization code with PKCE S256, a random state and nonce, and exact redirect http://localhost:5173/auth/callback. Origin is http://localhost:5173. Password grant, implicit flow, service accounts and public registration are disabled for this client. Frontend login is not implemented yet; the callback is its planned contract.
+The public client is olarize-web. Its local Swagger redirect URIs and browser origins use the same `BACKEND_PORT` environment variable as the backend host port (default 8080). Keycloak receives that variable from Compose and resolves it when importing the realm. Its own published port remains independently configured by `KEYCLOAK_PORT` (default 8081). Use authorization code with PKCE S256, a random state and nonce, and exact redirect http://localhost:5173/auth/callback. Origin is http://localhost:5173. Password grant, implicit flow, service accounts and public registration are disabled for this client. Frontend login is not implemented yet; the callback is its planned contract.
 
 Issuer: http://localhost:8081/realms/olarize. Discovery: /realms/olarize/.well-known/openid-configuration. Request openid and profile.read. The API audience mapper adds olarize-api only to access tokens. Access tokens expire after five minutes. Keep tokens in memory and out of logs/URLs; require MFA for privileged users before a shared deployment.
 
-## GET /api/v1/me
+## GET /api/v1/identity
 
 Supply Authorization: Bearer <access-token>. A successful response is:
 
@@ -48,4 +48,6 @@ Run ./scripts/verify-backend.sh. Tests use disposable PostgreSQL through Testcon
 
 References: https://www.keycloak.org/getting-started/getting-started-docker and https://www.keycloak.org/server/containers.
 
-Swagger UI is available only in the local profile at http://localhost:8080/swagger-ui/index.html. Click Authorize, select profile.read, and sign in with a synthetic realm user. It uses authorization code + PKCE without a client secret. To verify this exact Swagger redirect in the live smoke test, run `SMOKE_REDIRECT_URI=http://localhost:8080/swagger-ui/oauth2-redirect.html python3 scripts/smoke-keycloak.py`.
+Swagger UI is available only in the local profile at `http://localhost:${BACKEND_PORT:-8080}/swagger-ui/index.html`. Click Authorize, select profile.read, and sign in with a synthetic realm user. It uses authorization code + PKCE without a client secret. To verify the configured Swagger redirect in the live smoke test, run `SMOKE_REDIRECT_URI=http://localhost:${BACKEND_PORT:-8080}/swagger-ui/oauth2-redirect.html python3 scripts/smoke-keycloak.py`.
+
+Keycloak imports the realm only when `olarize` does not already exist. If you change `BACKEND_PORT` after the first import, update the `olarize-web` client's Valid redirect URIs and Web origins in the Keycloak Admin Console to the matching localhost and 127.0.0.1 callback/origin URLs. Do not delete the Keycloak volume to apply this local client change.

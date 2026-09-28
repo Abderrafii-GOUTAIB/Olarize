@@ -42,7 +42,7 @@ class SecurityConfiguration {
         return http
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/me").hasAuthority("SCOPE_profile.read")
+                .requestMatchers(HttpMethod.GET, "/api/v1/identity", "/api/v1/identity/memberships", "/api/v1/identity/company-context").hasAuthority("SCOPE_profile.read")
                 .anyRequest().denyAll())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .oauth2ResourceServer(oauth -> oauth

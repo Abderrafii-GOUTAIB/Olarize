@@ -3,16 +3,16 @@ info:
   title: Olarize API
   version: 0.1.0
 paths:
-  /api/v1/me:
+  /api/v1/identity:
     get:
       operationId: getCurrentIdentity
       summary: Return the authenticated external subject
-      description: Requires a Keycloak access token with the profile.read scope. Does not imply company membership or HR permissions.
+      description: Returns the subject (sub) from the validated Keycloak access token. This is the identity-provider ID, not an employee ID, and it does not grant access to company or HR data. Requires the profile.read scope.
       security:
         - keycloak: [profile.read]
       responses:
         '200':
-          description: Authenticated identity
+          description: The authenticated subject identifier from the access token.
           content:
             application/json:
               schema:
@@ -31,6 +31,70 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/identity/memberships:
+    get:
+      operationId: listCurrentMemberships
+      summary: List my active company memberships
+      description: Returns the companies that the signed-in user is currently an active member of. Each item includes the company ID and name, membership ID, current permissions, and membership version. The user is identified from the validated Keycloak access token; no subject or company ID is accepted as proof of membership. If the user has no active memberships, this endpoint returns an empty list. Memberships are loaded from current database state on every request, so changes and revocations are reflected on the next request. Requires the profile.read scope.
+      security:
+        - keycloak: [profile.read]
+      responses:
+        '200':
+          description: The signed-in user's active company memberships; an empty array means there are none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/CompanyContext'}
+        '400':
+          description: Unsupported query parameters were supplied.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: The access token is valid but does not include profile.read.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/identity/company-context:
+    get:
+      operationId: resolveCurrentCompanyContext
+      summary: Resolve my active company context
+      description: Returns the company context for one of the signed-in user's current active memberships. Without companyId, the endpoint selects the company when the user has exactly one active membership. If the user has several active memberships, pass one of the companyId values returned by GET /api/v1/identity/memberships. The response includes that membership's current permissions and version. A requested company ID does not grant access; membership is checked against current database state on every request. Requires the profile.read scope.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - name: companyId
+          in: query
+          required: false
+          description: Optional company UUID from your active memberships. Omit it when you have one active membership; provide it when you have more than one.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The selected company and the signed-in user's active membership permissions.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CompanyContext'}
+        '400':
+          description: The companyId is malformed or duplicated, an unsupported query parameter was supplied, or companyId is required because the user has multiple active memberships.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: The user has no active membership in the requested company, or no active membership can be selected automatically.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
 components:
   securitySchemes:
     keycloak:
@@ -42,6 +106,19 @@ components:
           scopes:
             profile.read: Read the authenticated subject
   schemas:
+    CompanyContext:
+      type: object
+      required: [membershipId, companyId, companyName, permissions, version]
+      additionalProperties: false
+      properties:
+        membershipId: {type: string, format: uuid}
+        companyId: {type: string, format: uuid}
+        companyName: {type: string}
+        permissions:
+          type: array
+          uniqueItems: true
+          items: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
     Problem:
       type: object
       required: [type, title, status, detail, code, requestId]

@@ -62,3 +62,5 @@ A database administrator can revoke the group membership and disable the persona
 ## Module contract
 
 `organization::api` exposes `CompanyLookup.find(companyId)` and immutable `CompanyIdentity`. It checks a unique `CompanyReadAuthorization` provider before any company query. Missing or ambiguous providers deny. EMP-001 will implement this SPI using current authenticated membership; neither a UUID nor a request header is trusted context. Each lookup runs in a separate read-only transaction, sets transaction-local database scope and applies an explicit company predicate. An unauthorized target returns an empty result without exposing its existence. The contract is internal to the modular backend; it adds no OpenAPI endpoint.
+
+Identity membership administration has a separate NOLOGIN role group and per-operator command. See [controlled membership provisioning](identity-provisioning.md). Normal runtime and company-provisioning credentials cannot grant memberships.

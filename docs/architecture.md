@@ -1,6 +1,6 @@
 # Olarize architecture and folder organization
 
-Olarize is a modular monolith: one Spring Boot application grouped by business capability, with clean dependency boundaries inside each module. The current implementation contains the platform/authentication foundation and ORG-001 company provisioning. Product scope and future module ownership remain in .instructions/reference/product-v1.md and the development guidance.
+Olarize is a modular monolith: one Spring Boot application grouped by business capability, with clean dependency boundaries inside each module. The current implementation contains the platform/authentication foundation, ORG-001 company provisioning, and EMP-001 trusted company context. Product scope and future module ownership remain in .instructions/reference/product-v1.md and the development guidance.
 
 ## Dependency direction
 
@@ -20,24 +20,31 @@ Domain code uses Java and domain types, not Spring/HTTP/JPA/provider types. Appl
 
 ```text
 com.olarize.<module>/
-  package-info.java           Modulith boundary and allowed dependencies
-  api/                        Public facade and cross-module contracts
-  internal/
-    domain/                   Rules, value objects, domain failures
-    application/              Use cases and ports
-    adapter/
-      in/web/                 Controllers and request/response DTOs
-      out/persistence/        JPA mapping and repositories
-      out/provider/           External services, when needed
+  package-info.java                    Modulith boundary and allowed dependencies
+  domain/model/                        Domain models and value objects
+  domain/service/                      Domain services, when rules span models
+  domain/event/                         Domain events, when emitted
+  domain/exception/                     Module-owned business failures
+  application/port/in/                 Use cases and public module contracts
+  application/port/out/                Persistence/provider contracts
+  application/service/                 Use cases, named *Service
+  application/command/                 Write inputs, when needed
+  application/query/                   Read inputs, when needed
+  adapter/in/web/                      HTTP controllers and DTOs
+  adapter/in/messaging/                Inbound messages, when needed
+  adapter/in/cli/                      Real command-line entry points
+  adapter/out/persistence/             JDBC/JPA persistence adapters
+  adapter/out/messaging/               Outbound messages, when needed
+  adapter/out/external/                External service adapters, when needed
 ```
 
-Other modules call only api. Controllers and AI tools call the same authorized use cases. Domain failures are translated to HTTP in web adapters, never by adding HTTP status to domain entities. A future leave module must not query employment repositories directly. Use identifiers and public APIs instead of cross-module JPA relationships. Do not create empty folders/classes to imitate this template.
+Other modules call only the contracts exposed from `application/port/in`. Controllers and other input adapters call the same authorized application services. Domain failures are translated to HTTP in web adapters, never by adding HTTP status to domain objects. A future leave module must not query employment persistence directly. Use identifiers and module ports instead of cross-module JPA relationships. Create a folder only when it has real code; do not add empty layers for appearance.
 
 ## Actual foundation
 
-platform/internal/web contains request correlation, centralized HTTP errors and local OpenAPI setup. platform/internal/security contains the closed-by-default security chain. platform is technical infrastructure; it must never hold payroll, leave or other business logic. identity/internal/adapter/in/web contains the current-user HTTP adapter and its endpoint documentation. Application entry point stays at com.olarize; this package is only the namespace root, not a place for feature classes. ArchitectureTests verifies Modulith dependencies and also enforces that future domain packages do not depend on framework/adapters.
+platform/internal/web contains request correlation, centralized HTTP errors and local OpenAPI setup. platform/internal/security contains the closed-by-default security chain. platform is technical infrastructure; it must never hold payroll, leave or other business logic. identity/adapter/in/web contains the current-user HTTP adapter and its endpoint documentation. Application entry point stays at com.olarize; this package is only the namespace root, not a place for feature classes. ArchitectureTests verifies Modulith dependencies and also enforces that future domain packages do not depend on framework/adapters.
 
-PostgreSQL stores authoritative business data; pgvector will store authorized policy search data. S3 and Bedrock integrations are planned, not implemented. Flyway owns migrations; Hibernate validates. Keycloak and the identity web adapter are implemented. Organization now owns company identity and atomic creation evidence through the restricted provisioning command; its tables use RLS and explicit grants. Company memberships and their trusted request integration remain pending. See [company provisioning](company-provisioning.md).
+PostgreSQL stores authoritative business data; pgvector will store authorized policy search data. S3 and Bedrock integrations are planned, not implemented. Flyway owns migrations; Hibernate validates. Keycloak and the identity web adapter are implemented. Organization owns company identity and atomic creation evidence through the restricted provisioning command; its tables use RLS and explicit grants. Identity owns company memberships and the current-subject company-context API; it consumes organization contracts exposed from `application/port/in`. The controlled identity-administrator command uses a separate restricted role, atomic audit, and current-state membership revocation checks. See [company provisioning](company-provisioning.md) and [membership provisioning](identity-provisioning.md).
 
 ## Future business module ownership
 
@@ -49,7 +56,7 @@ PostgreSQL stores authoritative business data; pgvector will store authorized po
 - assistant: bounded orchestration and exact confirmed tool proposals.
 - notifications and audit: durable delivery and traceable business changes.
 
-Except for identity authentication and organization provisioning, these business capabilities remain planned. Domain purity checks cover the organization registration rules.
+Except for identity authentication, trusted company memberships and organization provisioning, these business capabilities remain planned. Domain purity checks cover the organization registration rules.
 
 ## Accepted MVP data and hosting direction
 
