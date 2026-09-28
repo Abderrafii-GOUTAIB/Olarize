@@ -2,6 +2,8 @@
 
 Status: **APPROVED requirements — EMP-001–016 and EMP-019 approved by the user on 2026-09-23; all 17 published to the verified OLARIZE backlog on 2026-09-23.** Revised **2026-09-23**, preserving the existing EMP-001–018 identifiers. Scope: Moroccan private companies, approximately 20–200 employees. This is the documented employee-module V1 backlog, including explicit shared-module dependencies, not an exhaustive employment-law catalogue or legal certification. Legal retrieval limitations are recorded below.
 
+> **Approved prerequisite sequence — 2026-09-28:** Start with ORG-001 / OLARIZE-18, then existing EMP-001 / OLARIZE-1, IAM-001 / OLARIZE-19 and IAM-002 / OLARIZE-20 before EMP-002. See [organization and identity requirements](organization-identity.md). This supersedes older “EMP-001 first / independently buildable” handoff wording below. Organization owns the company schema; identity owns memberships and trusted context. EMP-001 retains its acceptance criteria and uses ORG-001’s restricted operational boundary and atomic audit for initial administrator provisioning/revocation. The four-ticket sequence is published and ranked above employee creation. Production grant authority remains OD-03.
+
 ## 1. Boundary and current state
 
 The employee module provides reliable, company-scoped employee identities, employment facts, reporting relationships, contract facts and history. Its first useful product outcome is: **an authorized HR user asks which contracts expire next month and receives the actual scoped records with explicit dates**.
@@ -118,7 +120,7 @@ These are dependency contracts, **not completed implementations or approved Jira
 | PRIV-DEP (privacy operations with identity/documents/assistant) | Accountable owner and reviewed purpose/notice, rights-response channel, per-class retention/holds/disposal, provider destinations and formalities. Verify removal from live stores/derived indexes and documented backup handling using synthetic data; no hard-coded retention rule. | All real-person processing; pending OD-02/04/05. This includes legally reviewed issuance/delivery of applicable hiring/work-card/cessation documents under EMP-LR-003/004. |
 | PROV-DEP (identity operations) | Document controlled membership grants/revocation and verified account-link evidence with actor, company and reason. No public self-provisioning. Exercise revoked tokens and wrong-company targets. | EMP-001 defines procedure; EMP-011 uses it. Named production grant authority remains OD-03. |
 
-No unnamed HR module is needed for EMP-001. EMP-002 owns its minimal atomic audit persistence through a focused port/adapter if no audit service yet exists; a later history view does not postpone write auditing.
+ORG-001 / OLARIZE-18 supplies company identity before EMP-001; no employee or document module is needed. EMP-002 owns its minimal atomic audit persistence through a focused port/adapter if no audit service yet exists; a later history view does not postpone write auditing.
 
 ## 2. Rule catalogue
 
@@ -194,9 +196,9 @@ EMP-001–016 and EMP-019 are approved requirements; EMP-017/018 remain draft. E
 
 **Story:** As an authenticated user, I want to see and select only my active company memberships so subsequent HR operations use the correct employer.
 
-**Scope:** `identity` backend slice: minimal company/membership schema, public trusted-context resolver and authenticated membership-list/context API. Reuse Keycloak and `/api/v1/me`. Excludes employee data, self-enrollment, role-management UI, frontend and AI. Controlled initial provisioning/revocation is documented, with no public bootstrap bypass.
+**Scope:** `identity` backend slice: membership schema consuming organization’s company ID/public contract from ORG-001 / OLARIZE-18, public trusted-context resolver and authenticated membership-list/context API. Reuse Keycloak and `/api/v1/me`. Excludes employee data, self-enrollment, role-management UI, frontend and AI. Controlled initial provisioning/revocation is documented, with no public bootstrap bypass.
 
-**Preconditions/dependencies:** Existing authentication/database foundation only; no employee or document module needed. **Permissions:** user reads own memberships; requested company is validated against the authenticated subject. **Rules:** EMP-BR-001/002/003/018, EMP-LR-007. **Data/state:** membership `(subject, company, explicit permissions, ACTIVE/REVOKED, version)`; selection is request context, not a global change to another user's session.
+**Preconditions/dependencies:** Existing authentication/database foundation and ORG-001 / OLARIZE-18; no employee or document module needed. **Permissions:** user reads own memberships; requested company is validated against the authenticated subject. **Rules:** EMP-BR-001/002/003/018, EMP-LR-007. **Data/state:** membership `(subject, company, explicit permissions, ACTIVE/REVOKED, version)`; selection is request context, not a global change to another user's session.
 
 **Acceptance:**
 
