@@ -46,7 +46,7 @@ The long-term source and roadmap discuss early AI and AWS. Your later explicit c
 
 1. You select EMP-001 and agree its scope and prerequisites. The story defines what success means; the instruction files do not invent the feature for you.
 2. The developer starts with `AGENTS.md`, `project.md`, `backend.md`, `security.md`, the architecture guide and the selected story. Unrelated payroll/RAG/infrastructure guidance is not needed.
-3. `olarize-feature` guides implementation: pure rules in `internal/domain`, use-case coordination and authorization in `internal/application`, HTTP in `internal/adapter/in/web`, persistence in `internal/adapter/out/persistence`.
+3. `olarize-feature` guides implementation: pure rules in `<module>/domain`, application services in `<module>/application/service`, HTTP in `<module>/adapter/in/web`, and persistence in `<module>/adapter/out/persistence`.
 4. The developer adds unit tests and real PostgreSQL integration tests, then runs `scripts/verify-backend.sh`. Test code lives in the backend test tree, not in skills.
 5. A separate reviewer uses `olarize-review`. The developer resolves valid findings and reruns affected checks. The reviewer does not silently fix its own findings.
 6. You inspect the diff and results. The connected workflow asks you to approve publication of that exact revision.

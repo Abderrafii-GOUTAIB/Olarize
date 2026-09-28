@@ -17,13 +17,13 @@
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:5173/auth/callback",
-        "http://localhost:8080/swagger-ui/oauth2-redirect.html",
-        "http://127.0.0.1:8080/swagger-ui/oauth2-redirect.html"
+        "http://localhost:${BACKEND_PORT}/swagger-ui/oauth2-redirect.html",
+        "http://127.0.0.1:${BACKEND_PORT}/swagger-ui/oauth2-redirect.html"
       ],
       "webOrigins": [
         "http://localhost:5173",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080"
+        "http://localhost:${BACKEND_PORT}",
+        "http://127.0.0.1:${BACKEND_PORT}"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"

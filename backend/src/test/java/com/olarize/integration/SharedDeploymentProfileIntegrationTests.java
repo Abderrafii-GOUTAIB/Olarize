@@ -52,7 +52,7 @@ abstract class SharedDeploymentProfileIntegrationTests {
 
     @Test void healthWorksAndLocalDocumentationRemainsClosed() throws Exception {
         assertThat(get("/actuator/health/readiness").statusCode()).isEqualTo(200);
-        for (String path : new String[]{"/v3/api-docs", "/swagger-ui/index.html", "/api/v1/me"}) {
+        for (String path : new String[]{"/v3/api-docs", "/swagger-ui/index.html", "/api/v1/identity"}) {
             var response = get(path);
             assertThat(response.statusCode()).as(path).isEqualTo(401);
             assertThat(response.headers().firstValue("content-type").orElse(""))

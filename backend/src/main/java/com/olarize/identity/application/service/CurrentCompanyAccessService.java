@@ -1,0 +1,40 @@
+package com.olarize.identity.application.service;
+
+import com.olarize.identity.application.port.in.CompanyAccessUseCase;
+import com.olarize.identity.application.port.in.CompanyContext;
+import com.olarize.identity.application.port.out.AuthenticatedSubjectPort;
+import com.olarize.identity.application.port.out.MembershipReaderPort;
+import com.olarize.identity.domain.model.Membership;
+import com.olarize.organization.application.port.in.CompanyLookupPort;
+import com.olarize.organization.application.port.in.CompanyReadAuthorizationPort;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.stereotype.Service;
+
+@Service
+public class CurrentCompanyAccessService implements CompanyAccessUseCase, CompanyReadAuthorizationPort {
+    private final AuthenticatedSubjectPort subject;
+    private final MembershipReaderPort memberships;
+    private final CompanyLookupPort companies;
+
+    public CurrentCompanyAccessService(AuthenticatedSubjectPort subject, MembershipReaderPort memberships, CompanyLookupPort companies) {
+        this.subject = subject;
+        this.memberships = memberships;
+        this.companies = companies;
+    }
+    @Override public List<CompanyContext> memberships() {
+        return memberships.activeFor(subject.require()).stream().filter(Membership::active).map(this::context).toList();
+    }
+    @Override public CompanyContext resolve(UUID requestedCompany) {
+        return context(Membership.select(memberships.activeFor(subject.require()), requestedCompany));
+    }
+    @Override public boolean mayRead(UUID companyId) {
+        if (companyId == null) return false;
+        return memberships.activeFor(subject.require()).stream()
+                .anyMatch(membership -> membership.active() && membership.companyId().equals(companyId));
+    }
+    private CompanyContext context(Membership membership) {
+        var company = companies.find(membership.companyId()).orElseThrow(com.olarize.identity.domain.exception.CompanyAccessDenied::new);
+        return new CompanyContext(membership.id(), membership.companyId(), company.name(), membership.permissions(), membership.version());
+    }
+}

@@ -41,5 +41,7 @@ class MigrateProfileIntegrationTests {
             .isEqualTo(1);
         assertThat(database.queryForObject("select extversion from pg_extension where extname = 'vector'", String.class))
             .isEqualTo("0.8.6");
+        assertThat(database.queryForObject("select to_regclass('public.identity_membership') is not null", Boolean.class)).isTrue();
+        assertThat(database.queryForObject("select to_regprocedure('public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid)') is not null", Boolean.class)).isTrue();
     }
 }

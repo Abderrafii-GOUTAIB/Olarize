@@ -14,7 +14,7 @@ class ArchitectureTests {
         noClasses().that().resideInAPackage("..domain..")
             .should().dependOnClassesThat().resideInAnyPackage(
                 "org.springframework..", "jakarta.persistence..", "jakarta.servlet..",
-                "..internal.adapter..", "..internal.application..")
+                "..adapter..", "..application..")
             .allowEmptyShould(true)
             .check(new ClassFileImporter().withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
                 .importPackages("com.olarize"));

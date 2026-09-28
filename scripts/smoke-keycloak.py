@@ -1,4 +1,4 @@
-"""Exercise local Keycloak PKCE login and /api/v1/me with a temporary user."""
+"""Exercise local Keycloak PKCE login and /api/v1/identity with a temporary user."""
 
 import base64
 import hashlib
@@ -129,14 +129,14 @@ def login_with_pkce(base_url, username, password):
 
 
 def check_endpoint(api_url, tokens, subject):
-    endpoint = api_url + "/api/v1/me"
+    endpoint = api_url + "/api/v1/identity"
     access_request = urllib.request.Request(
         endpoint, headers={"Authorization": "Bearer " + tokens["access_token"]}
     )
     with urllib.request.urlopen(access_request, timeout=TIMEOUT_SECONDS) as response:
         assert response.status == 200
         assert json.load(response) == {"subject": subject}
-    print("PASS: real Keycloak authorization-code + PKCE login and /api/v1/me")
+    print("PASS: real Keycloak authorization-code + PKCE login and /api/v1/identity")
 
     id_request = urllib.request.Request(
         endpoint, headers={"Authorization": "Bearer " + tokens["id_token"]}
