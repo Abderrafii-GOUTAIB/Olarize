@@ -89,3 +89,13 @@ Run `./developer-workbench/start.sh` and open its private local launch URL. Read
 ORG-001 adds a separate `provision-company` command to the packaged backend. It uses personal restricted database credentials, stdin JSON and atomic company/audit persistence. See [the provisioning runbook](company-provisioning.md) for role grants, inputs, retries and exit codes. It does not start the web server. Membership integration remains EMP-001.
 
 Verified on 2026-09-28 for ORG-001: all 51 unit/architecture/HTTP/PostgreSQL tests passed with no skips, including eight company provisioning integration tests; the backend jar was packaged. The command smoke check returned sanitized invalid-input JSON without starting Spring or HTTP. Independent review findings were fixed and re-reviewed. See [task 004](../.instructions/tasks/004-company-provisioning.md) for evidence and remaining production prerequisites.
+
+## Automatic pull requests after commits
+
+After `./scripts/install-hooks.sh`, a successful commit on `feature/OLARIZE-<number>` or `fix/OLARIZE-<number>` runs the post-commit hook. It pushes that branch to `origin` and creates a PR into `develop`, or pushes updates to its existing open PR. This workflow is authorized by the user's project preference; no workbench is required. It never merges or force-pushes.
+
+The PR title is `<ticket>: <Jira summary>` and its description links the Jira issue. Before implementation, `olarize-feature` reads the live Jira ticket and saves its exact key, summary and URL in `.github/jira/<ticket>.json`. This file contains no credentials. Refresh it from Jira if the ticket title changes before publication.
+
+Git uses its configured push authentication. GitHub API access uses `GITHUB_TOKEN` or `GH_TOKEN`, or the configured HTTPS Git credential helper. Keep credentials out of source. Failed publication leaves the local commit intact and prints a retry command: `python3 scripts/publish-pr.py`. The pre-commit and commit-msg checks still run before the commit; backend verification and CI remain separate.
+
+Verify publication behavior without network calls using `python3 scripts/test-publish-pr.py`.

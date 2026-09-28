@@ -9,13 +9,13 @@ if [ -n "$CURRENT_HOOKS" ] && [ "$CURRENT_HOOKS" != ".githooks" ]; then
     exit 1
 fi
 if [ -z "$CURRENT_HOOKS" ]; then
-    for hook in pre-commit commit-msg; do
+    for hook in pre-commit commit-msg post-commit; do
         if [ -f "$(git rev-parse --git-path "hooks/$hook")" ]; then
             printf 'Olarize: an existing %s hook exists; integrate it explicitly before installation.\n' "$hook" >&2
             exit 1
         fi
     done
 fi
-chmod +x .githooks/pre-commit .githooks/commit-msg
+chmod +x .githooks/pre-commit .githooks/commit-msg .githooks/post-commit
 git config --local core.hooksPath .githooks
 printf '%s\n' 'Olarize: project-local Git hooks enabled.'

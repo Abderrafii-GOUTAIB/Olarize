@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Publication failures must not hide a successful local commit.
+set -eu
+root=$(git rev-parse --show-toplevel)
+if ! python3 "$root/scripts/publish-pr.py"; then
+    printf '%s\n' 'Olarize: automatic publication did not finish; your local commit is safe.' >&2
+fi
