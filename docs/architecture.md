@@ -1,6 +1,6 @@
 # Olarize architecture and folder organization
 
-Olarize is a modular monolith: one Spring Boot application grouped by business capability, with clean dependency boundaries inside each module. The current implementation contains only the platform foundation. Product scope and future module ownership remain in .instructions/reference/product-v1.md and the development guidance.
+Olarize is a modular monolith: one Spring Boot application grouped by business capability, with clean dependency boundaries inside each module. The current implementation contains the platform/authentication foundation and ORG-001 company provisioning. Product scope and future module ownership remain in .instructions/reference/product-v1.md and the development guidance.
 
 ## Dependency direction
 
@@ -37,19 +37,19 @@ Other modules call only api. Controllers and AI tools call the same authorized u
 
 platform/internal/web contains request correlation, centralized HTTP errors and local OpenAPI setup. platform/internal/security contains the closed-by-default security chain. platform is technical infrastructure; it must never hold payroll, leave or other business logic. identity/internal/adapter/in/web contains the current-user HTTP adapter and its endpoint documentation. Application entry point stays at com.olarize; this package is only the namespace root, not a place for feature classes. ArchitectureTests verifies Modulith dependencies and also enforces that future domain packages do not depend on framework/adapters.
 
-PostgreSQL stores authoritative business data; pgvector will store authorized policy search data. S3 and Bedrock integrations are planned, not implemented. Flyway owns migrations; Hibernate validates. Keycloak and the identity web adapter are implemented. Company memberships, domain modules and tenant isolation remain pending.
+PostgreSQL stores authoritative business data; pgvector will store authorized policy search data. S3 and Bedrock integrations are planned, not implemented. Flyway owns migrations; Hibernate validates. Keycloak and the identity web adapter are implemented. Organization now owns company identity and atomic creation evidence through the restricted provisioning command; its tables use RLS and explicit grants. Company memberships and their trusted request integration remain pending. See [company provisioning](company-provisioning.md).
 
 ## Future business module ownership
 
 - identity: company memberships, roles and trusted request scope.
-- organization and employment: employees, reporting lines, contract facts.
+- organization: company identity; employment: employees, reporting lines and contract facts.
 - leave and attendance: entitlement ledger, decisions, schedules and validated presence.
 - payroll and socialprotection: preparation snapshots, reviewed CNSS/CIMR calculations and reconciliation. Payroll calls socialprotection with immutable inputs; avoid reverse dependencies.
 - documents and knowledge: file publication/access, authorized indexing and RAG.
 - assistant: bounded orchestration and exact confirmed tool proposals.
 - notifications and audit: durable delivery and traceable business changes.
 
-These modules are planned, not empty generated implementations. Domain purity checks currently allow no domain classes; the rule becomes substantive as features are added.
+Except for identity authentication and organization provisioning, these business capabilities remain planned. Domain purity checks cover the organization registration rules.
 
 ## Accepted MVP data and hosting direction
 

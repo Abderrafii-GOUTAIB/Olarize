@@ -5,6 +5,12 @@ description: Implement a requested Olarize Spring Boot business feature from use
 
 # Develop one Olarize backend feature
 
+## Ticket branch required
+
+Before implementation, resolve the story's Jira key and create and switch to a branch named for the action and the actual ticket: `feature/OLARIZE-<number>` for a feature or `fix/OLARIZE-<number>` for a bug fix (for example `feature/OLARIZE-18` or `fix/OLARIZE-42`). Use `develop` as the base unless the user specifies another base. Inspect Git status and existing branches first; preserve all existing changes. If the ticket branch already exists, resume it after verifying it belongs to the selected story. Do not implement directly on `develop` or `master`. If no ticket key is available from the request or approved story, ask for it before coding. Branch creation is part of invoking this skill and needs no separate confirmation. When committing is authorized, prefix the subject with the ticket from the active branch and a nonempty description, for example `OLARIZE-18: add company provisioning`. Never hard-code the example ticket for another story.
+
+For a story managed by the connected workbench, use its existing run and have that workflow create or select the ticket branch; do not create a duplicate branch or developer session. Report a branch-name mismatch before implementation so it can be resolved without losing existing work.
+
 Work from the repository root containing `AGENTS.md`. The feature input is either user-supplied business rules, one selected story from `docs/requirements/<module>.md`, or its published Jira key. When given a story ID or Jira key, read that one story, its linked rule catalogue entries and dependencies; implement only that story. Use this project's Atlassian MCP connection to read a supplied Jira key, then compare it with the local approved story and resolve any material mismatch before coding. This skill guides implementation; application logic belongs in `backend/src/main/java`, never in this skill or `.instructions/`. Complete the requested feature, not just a plan.
 
 1. Read `AGENTS.md`, `.instructions/project.md`, `.instructions/backend.md`, `docs/architecture.md`, and the matching task in `.instructions/tasks/`. If given a story file, ID, or Jira key, use that story's linked rules and acceptance scenarios as the feature contract. If no task matches, create a concise task from `.instructions/tasks/TEMPLATE.md` with the user-visible result, actors, permissions, inputs, outputs, invariants, failure cases and acceptance checks. Resolve routine gaps using existing product scope; ask only when a missing business or legal decision changes the result.
@@ -18,3 +24,7 @@ Work from the repository root containing `AGENTS.md`. The feature input is eithe
 8. Follow `.instructions/development-workflow.md` to delegate a separate, findings-only review after implementation and verification. Provide the approved story, stable diff and actual test evidence. Fix valid findings, rerun affected checks, and obtain a focused re-review before reporting completion. Disclose unavailable delegation or checks.
 
 Invocation example: `Use $olarize-feature. Business rule: an HR administrator can list contracts expiring within a requested date range for their company; ordinary employees cannot. Implement the backend feature with unit and PostgreSQL integration tests. Do not add AI.`
+
+## Automatic PR publication
+
+After reading the live Jira issue, save its exact key, summary and browse URL as JSON in `.github/jira/<ticket>.json` with fields `key`, `summary`, and `url`. Keep this metadata aligned with the selected ticket. The user authorizes successful commits to push the ticket branch and create or reuse a PR into `develop` through the project post-commit hook. Use the Jira summary in the PR title and link the ticket in the body. No connected workbench or additional publication confirmation is needed for this direct workflow. Commit only when authorized by the active task; never merge, force-push or deploy as part of publication.

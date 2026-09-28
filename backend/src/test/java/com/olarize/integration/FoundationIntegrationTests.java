@@ -172,6 +172,17 @@ class FoundationIntegrationTests {
         assertThat(authenticatedGet("/api/employees", token("valid")).statusCode()).isEqualTo(403);
     }
 
+    @Test void companyProvisioningHasNoHttpSurface() throws Exception {
+        assertThat(get("/api/v1/companies").statusCode()).isEqualTo(401);
+        assertThat(authenticatedGet("/api/v1/companies", token("valid")).statusCode()).isEqualTo(403);
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/companies"))
+                .header("Authorization", "Bearer " + token("valid"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"name\":\"Synthetic\"}")).build();
+        assertThat(client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
+        assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+    }
+
     @Test void clientCannotSelectAnotherSubject() throws Exception {
         assertThat(authenticatedGet("/api/v1/me?subject=other-user", token("valid")).body())
                 .isEqualTo("{\"subject\":\"user-123\"}");
