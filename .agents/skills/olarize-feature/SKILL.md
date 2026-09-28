@@ -24,3 +24,7 @@ Work from the repository root containing `AGENTS.md`. The feature input is eithe
 8. Follow `.instructions/development-workflow.md` to delegate a separate, findings-only review after implementation and verification. Provide the approved story, stable diff and actual test evidence. Fix valid findings, rerun affected checks, and obtain a focused re-review before reporting completion. Disclose unavailable delegation or checks.
 
 Invocation example: `Use $olarize-feature. Business rule: an HR administrator can list contracts expiring within a requested date range for their company; ordinary employees cannot. Implement the backend feature with unit and PostgreSQL integration tests. Do not add AI.`
+
+## Automatic PR publication
+
+After reading the live Jira issue, save its exact key, summary and browse URL as JSON in `.github/jira/<ticket>.json` with fields `key`, `summary`, and `url`. Keep this metadata aligned with the selected ticket. The user authorizes successful commits to push the ticket branch and create or reuse a PR into `develop` through the project post-commit hook. Use the Jira summary in the PR title and link the ticket in the body. No connected workbench or additional publication confirmation is needed for this direct workflow. Commit only when authorized by the active task; never merge, force-push or deploy as part of publication.

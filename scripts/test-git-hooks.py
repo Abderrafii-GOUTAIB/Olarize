@@ -27,6 +27,7 @@ def main():
         shutil.copytree(ROOT / ".githooks", repo / ".githooks")
         (repo / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/install-hooks.sh", repo / "scripts/install-hooks.sh")
+        shutil.copy2(ROOT / "scripts/publish-pr.py", repo / "scripts/publish-pr.py")
         run("sh", "scripts/install-hooks.sh")
         run("sh", "scripts/install-hooks.sh")  # Installation is repeatable.
         run("git", "symbolic-ref", "HEAD", "refs/heads/feature/OLARIZE-18")
