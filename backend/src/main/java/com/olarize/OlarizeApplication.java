@@ -7,7 +7,11 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class OlarizeApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(OlarizeApplication.class, args);
+		if (args.length > 0 && "provision-company".equals(args[0])) {
+            System.exit(com.olarize.organization.CompanyProvisioning.run(args));
+            return;
+        }
+        SpringApplication.run(OlarizeApplication.class, args);
 	}
 
 }

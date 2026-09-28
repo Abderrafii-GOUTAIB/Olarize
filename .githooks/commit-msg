@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+ticket=$(sh "$(dirname -- "$0")/ticket-branch.sh")
+subject=$(sed -n '1p' "$1")
+if ! printf '%s\n' "$subject" | LC_ALL=C grep -Eq "^${ticket}: [^[:space:]].*$"; then
+    printf 'Olarize: commit subject must start with "%s: " followed by a description matching the branch ticket.\n' "$ticket" >&2
+    exit 1
+fi

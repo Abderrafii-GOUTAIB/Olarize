@@ -1,6 +1,6 @@
 # Olarize
 
-AI-native HR for Moroccan private companies with approximately 20-200 employees. This repository currently contains the Spring Boot and Docker foundation. Keycloak authentication and GET /api/v1/me are implemented. HR business workflows, frontend and AI integrations are not implemented yet.
+AI-native HR for Moroccan private companies with approximately 20-200 employees. This repository currently contains the Spring Boot and Docker foundation. Keycloak authentication and GET /api/v1/me are implemented. ORG-001 company provisioning is available through a restricted administrative command; see [company provisioning](docs/company-provisioning.md). Employee workflows, frontend and AI integrations are not implemented yet.
 
 ## Stack
 

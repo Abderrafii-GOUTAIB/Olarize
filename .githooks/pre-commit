@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # Check the index, not unstaged work; never rewrite or stage user files.
 set -eu
+sh "$(dirname -- "$0")/ticket-branch.sh" >/dev/null
 if ! git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab diff --cached --check; then
     printf '%s\n' 'Olarize: fix the reported staged whitespace/conflict markers, then stage your fixes.' >&2
     exit 1

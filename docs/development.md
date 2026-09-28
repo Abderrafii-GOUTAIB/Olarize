@@ -72,14 +72,20 @@ Verified on 2026-09-23: 37 backend tests passed from a clean build, including Po
 
 ## Development agents and Git hooks
 
-Follow [the development workflow](../.instructions/development-workflow.md) for one-story implementation, independent review and fixes. Enable the project-local pre-commit hook once per clone:
+Follow [the development workflow](../.instructions/development-workflow.md) for one-story implementation, independent review and fixes. Enable the project-local Git hooks once per clone:
 
 ```sh
 ./scripts/install-hooks.sh
 ```
 
-The hook checks staged whitespace and conflict markers without changing files. Full tests remain in `./scripts/verify-backend.sh` and CI. The reviewer configuration is `.codex/agents/olarize-reviewer.toml`; it reviews using the existing `olarize-review` skill and returns findings to the developer. A fresh Codex task opened in this repository may be needed to discover the role.
+The pre-commit hook requires an action-based branch (`feature/OLARIZE-18` for a feature or `fix/OLARIZE-42` for a fix) and checks staged whitespace and conflict markers. The commit-msg hook requires a subject such as `OLARIZE-18: add company provisioning`, with the ticket taken from the active branch and a nonempty description. Both hooks block invalid commits and stay silent on success. They do not change files. Run `python3 scripts/test-git-hooks.py` to verify the hooks in disposable local repositories. Full tests remain in `./scripts/verify-backend.sh` and CI. The reviewer configuration is `.codex/agents/olarize-reviewer.toml`; it reviews using the existing `olarize-review` skill and returns findings to the developer. A fresh Codex task opened in this repository may be needed to discover the role.
 
 ## Connected developer workbench
 
 Run `./developer-workbench/start.sh` and open its private local launch URL. Read [the workbench guide](../developer-workbench/README.md) for live execution prerequisites, approval gates and current limits. The original static planner remains separate. Verify this tool with `PYTHONDONTWRITEBYTECODE=1 python3 developer-workbench/service/test_workbench.py` and `node --check developer-workbench/connected.js`; these checks do not run Olarize HR features or publish external issues/PRs.
+
+## Company provisioning
+
+ORG-001 adds a separate `provision-company` command to the packaged backend. It uses personal restricted database credentials, stdin JSON and atomic company/audit persistence. See [the provisioning runbook](company-provisioning.md) for role grants, inputs, retries and exit codes. It does not start the web server. Membership integration remains EMP-001.
+
+Verified on 2026-09-28 for ORG-001: all 51 unit/architecture/HTTP/PostgreSQL tests passed with no skips, including eight company provisioning integration tests; the backend jar was packaged. The command smoke check returned sanitized invalid-input JSON without starting Spring or HTTP. Independent review findings were fixed and re-reviewed. See [task 004](../.instructions/tasks/004-company-provisioning.md) for evidence and remaining production prerequisites.

@@ -60,6 +60,8 @@ Writes require explicit command execution or confirmed API submission; preview/c
 
 ### ORG-001 — Provision a company identity
 
+**Implementation evidence (2026-09-28):** implemented locally; full suite 51 tests passed, including eight PostgreSQL provisioning cases. Independent review findings resolved. See [task 004](../../.instructions/tasks/004-company-provisioning.md) and [operational runbook](../company-provisioning.md). Jira status has not been transitioned; this is not deployment or production onboarding approval.
+
 **Review:** APPROVED on 2026-09-28. **Jira:** [OLARIZE-18](https://goutaibabderrafii.atlassian.net/browse/OLARIZE-18) — published; À faire; no sprint. **Actor/value:** As a controlled provisioning operator, I want to register a company once so later memberships and employees have a stable employer identity.
 
 **Scope:** `organization` schema and public company lookup contract plus a non-HTTP administrative command for company creation. Inputs: company name, reason, idempotency key; operator identity comes from authenticated operational execution, not an arbitrary actor field. Persist generated company ID, name, version and timestamps, with atomic audit. The command uses a dedicated restricted provisioning credential unavailable to the web runtime. Document credential handling and synthetic execution. Initial membership provisioning remains EMP-001; no parallel membership implementation here.
