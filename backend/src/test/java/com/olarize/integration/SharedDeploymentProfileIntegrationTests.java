@@ -32,6 +32,8 @@ abstract class SharedDeploymentProfileIntegrationTests {
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", POSTGRES::getUsername);
         properties.add("spring.datasource.password", POSTGRES::getPassword);
+        properties.add("olarize.identity.database-scope-key",
+                () -> "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         properties.add("olarize.auth.issuer", () -> "https://identity.example.test/realms/olarize");
         properties.add("olarize.auth.jwk-set-uri", () -> "https://identity.example.test/certs");
     }

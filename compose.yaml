@@ -73,6 +73,7 @@ services:
       FLYWAY_USER: ${POSTGRES_USER:-olarize}
       FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       LOCAL_RUNTIME_PASSWORD: ${LOCAL_RUNTIME_PASSWORD:-${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}
+      DB_SCOPE_KEY: ${DB_SCOPE_KEY:?Set DB_SCOPE_KEY to 64 random hex characters in .env}
     depends_on:
       db:
         condition: service_healthy

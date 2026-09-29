@@ -23,7 +23,7 @@ These are application grants, not Keycloak roles. HR access does not include pay
 
 ## Required runtime setup
 
-The web database login must be a dedicated non-superuser, non-owner and non-`BYPASSRLS` role. It receives membership SELECT only for its own subject and EXECUTE on the membership-administration functions; it gets no direct membership or audit write grant. Follow the owner/runtime separation in [identity provisioning](identity-provisioning.md). The migration's security-definer functions must be owned by the restricted `olarize_identity_provisioner_owner` role, which receives only the table privileges those functions need. Never grant the web runtime membership in that owner or the initial-provisioning operator group.
+The web database login must be a dedicated non-superuser, non-owner and non-`BYPASSRLS` role. It receives membership SELECT only for its signed subject and EXECUTE on the guarded membership-administration functions; it gets no direct membership or audit write grant. Follow the owner/runtime separation in [identity provisioning](identity-provisioning.md). The migration's security-definer functions must be owned by the restricted `olarize_identity_provisioner_owner` role, which receives only the table privileges those functions need. Never grant the web runtime membership in that owner or the initial-provisioning operator group. IAM-002 renames the V5 functions to private internal entry points and adds wrappers that require a signed subject/company proof. The runtime must have no EXECUTE on the internal functions; the restricted owner owns both wrappers and internals. Configure `DB_SCOPE_KEY` as described in [company isolation](company-isolation.md).
 
 Grant the runtime role function execution after migrations:
 
@@ -33,7 +33,7 @@ GRANT EXECUTE ON FUNCTION public.change_company_membership(text, uuid, text, tex
 GRANT EXECUTE ON FUNCTION public.find_company_membership_change_retry(text, uuid, text, text, text, bigint, bigint, text, uuid) TO olarize_runtime;
 ```
 
-After V5 is applied, the restricted owner also needs `SELECT` on `organization_company`, `SELECT, INSERT, UPDATE` on `identity_membership`, and `SELECT, INSERT` on `identity_membership_change_audit`. Transfer ownership of all three V5 functions and the new audit table to `olarize_identity_provisioner_owner`; preserve the separate migrator ownership of the existing membership tables/functions. See the integration fixture in `CompanyContextIntegrationTests` for the exact owner and execution grants used by tests.
+After V6 is applied, the restricted owner also needs `SELECT` on `organization_company`, `SELECT, INSERT, UPDATE` on `identity_membership`, and `SELECT, INSERT` on `identity_membership_change_audit`. Transfer ownership of all three guarded functions and their `_internal` implementations, plus the change-audit table, to `olarize_identity_provisioner_owner`; preserve the separate migrator ownership of the existing membership tables/functions. See the integration fixture in `CompanyContextIntegrationTests` for the exact owner and execution grants used by tests.
 
 Configure the Keycloak service account and shared preview key through the secret manager/environment:
 

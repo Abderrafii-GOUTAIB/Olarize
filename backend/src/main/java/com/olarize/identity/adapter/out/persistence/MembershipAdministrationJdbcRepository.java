@@ -6,6 +6,7 @@ import com.olarize.identity.domain.exception.CompanyAccessDenied;
 import com.olarize.identity.domain.exception.InvalidMembershipPreview;
 import com.olarize.identity.domain.exception.MembershipChangeRejected;
 import com.olarize.identity.domain.model.Membership;
+import com.olarize.platform.api.DatabaseScopeSigner;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
@@ -17,12 +18,17 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 class MembershipAdministrationJdbcRepository implements MembershipAdministrationPort {
     private final JdbcTemplate database;
+    private final DatabaseScopeSigner scope;
 
-    MembershipAdministrationJdbcRepository(JdbcTemplate database) { this.database = database; }
+    MembershipAdministrationJdbcRepository(JdbcTemplate database, DatabaseScopeSigner scope) {
+        this.database = database;
+        this.scope = scope;
+    }
 
     @Override @Transactional(readOnly = true)
     public List<Membership> list(String actorSubject, UUID companyId) {
         try {
+            scope.apply(database, actorSubject, companyId);
             return database.query("select * from public.list_company_identity_memberships(?, ?)",
                     MembershipJdbcMapper.ADMINISTRATION_RESULT, actorSubject, companyId);
         } catch (DataAccessException failure) {
@@ -33,6 +39,7 @@ class MembershipAdministrationJdbcRepository implements MembershipAdministration
     @Override @Transactional(readOnly = true)
     public Membership findCommittedRetry(String actorSubject, MembershipChangePreviewClaims preview, UUID idempotencyKey) {
         try {
+            scope.apply(database, actorSubject, preview.companyId());
             List<Membership> committed = database.query("""
                     select * from public.find_company_membership_change_retry(?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, MembershipJdbcMapper.ADMINISTRATION_RESULT, actorSubject, preview.companyId(), preview.targetSubject(),
@@ -49,6 +56,7 @@ class MembershipAdministrationJdbcRepository implements MembershipAdministration
     public Membership change(String actorSubject, MembershipChangePreviewClaims preview,
             UUID idempotencyKey, String correlationId) {
         try {
+            scope.apply(database, actorSubject, preview.companyId());
             return database.queryForObject("""
                     select * from public.change_company_membership(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, MembershipJdbcMapper.ADMINISTRATION_RESULT, actorSubject, preview.companyId(), preview.targetSubject(),

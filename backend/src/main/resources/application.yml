@@ -16,6 +16,8 @@ spring:
       hibernate.jdbc.time_zone: UTC
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
+    placeholders:
+      db_scope_key: ${DB_SCOPE_KEY:}
   lifecycle:
     timeout-per-shutdown-phase: 20s
 server:
@@ -51,6 +53,7 @@ olarize:
     client-id: ${AUTH_CLIENT_ID:olarize-web}
   identity:
     preview-secret: ${IDENTITY_PREVIEW_SECRET:${random.uuid}-${random.uuid}}
+    database-scope-key: ${DB_SCOPE_KEY:}
   identity-provider:
     admin-base-url: ${KEYCLOAK_ADMIN_BASE_URL:}
     realm: ${KEYCLOAK_REALM:olarize}

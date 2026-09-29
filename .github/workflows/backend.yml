@@ -25,6 +25,7 @@ jobs:
           POSTGRES_PASSWORD: ci-only-not-for-production
           KEYCLOAK_DB_PASSWORD: ci-only-keycloak
           KEYCLOAK_ADMIN_PASSWORD: ci-only-admin
+          DB_SCOPE_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
         run: docker compose config --quiet
       - name: Build backend image
         run: docker build --tag olarize-backend:ci backend

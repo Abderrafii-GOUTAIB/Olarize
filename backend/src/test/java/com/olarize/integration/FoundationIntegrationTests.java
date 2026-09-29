@@ -72,6 +72,10 @@ class FoundationIntegrationTests {
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", POSTGRES::getUsername);
         properties.add("spring.datasource.password", POSTGRES::getPassword);
+        properties.add("spring.flyway.placeholders.db_scope_key",
+                () -> "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        properties.add("olarize.identity.database-scope-key",
+                () -> "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     }
 
     @LocalServerPort int port;
