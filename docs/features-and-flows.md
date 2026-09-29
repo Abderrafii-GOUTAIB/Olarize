@@ -88,6 +88,8 @@ sequenceDiagram
 
 The company ID in the URL only selects the requested scope. Every route checks the caller's current active `identity.admin` membership in PostgreSQL. The API cannot manage itself or another identity administrator. Grants and reactivations require the Keycloak user lookup; ordinary revocation still works if Keycloak is unavailable. Membership changes are stored in PostgreSQL, so a still-valid access token does not preserve removed permissions.
 
+The membership administration service uses one persistence adapter, `MembershipAdministrationJdbcRepository`. A clean backend verification confirms Spring starts with that single port implementation; this fixes the duplicate-bean failure seen in CI after the repository rename.
+
 ## User request flow today
 
 ```mermaid

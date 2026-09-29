@@ -34,6 +34,8 @@ Run focused domain and integration tests, then `./scripts/verify-backend.sh`. Ad
 
 **2026-09-29 persistence naming:** Identity and organization persistence classes now end in `JdbcRepository`; shared membership SQL row mapping is in `MembershipJdbcMapper`. Focused membership/company integration checks passed (24 tests), and `./scripts/verify-backend.sh` passed the final revision (77 tests, 0 failures or errors). Independent focused review found no persistence wiring or mapping issue.
 
+**2026-09-29 CI startup fix:** Removed the obsolete `MembershipAdministrationPersistenceAdapter` left alongside `MembershipAdministrationJdbcRepository`. Both implemented `MembershipAdministrationPort`, so Spring could not start. A clean `./scripts/verify-backend.sh` run passed 76 tests with no failures, errors or skips and packaged the backend jar.
+
 ## Completion notes
 
 Production identity-administrator grant authority remains blocked by OD-03. Tests use synthetic subjects and provider fixtures. Jira metadata is recorded in `.github/jira/OLARIZE-19.json` for the approved PR workflow.
