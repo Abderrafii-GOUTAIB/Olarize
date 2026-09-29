@@ -36,12 +36,14 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.containers.wait.strategy.Wait;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.flyway.enabled=false", "spring.datasource.hikari.maximum-pool-size=2",
         "spring.datasource.hikari.connection-timeout=1000"})
 class CompanyContextIntegrationTests {
+    static final String SCOPE_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     static final RSAKey SIGNING_KEY;
     static final RSAKey UNTRUSTED_KEY;
     static final HttpServer KEYS;
@@ -100,11 +102,13 @@ class CompanyContextIntegrationTests {
         properties.add("olarize.identity-provider.client-id", () -> "synthetic-client");
         properties.add("olarize.identity-provider.client-secret", () -> "synthetic-secret");
         properties.add("olarize.identity.preview-secret", () -> "synthetic-preview-signing-key-32-bytes-minimum");
+        properties.add("olarize.identity.database-scope-key", () -> SCOPE_KEY);
     }
 
 
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.olarize.platform.api.DatabaseScopeSigner scope;
     @Autowired com.olarize.identity.application.port.in.CompanyAccessUseCase access;
     @Autowired com.olarize.identity.application.port.out.MembershipReaderPort reader;
     @Autowired com.olarize.organization.application.port.in.CompanyLookupPort companyLookup;
@@ -113,7 +117,8 @@ class CompanyContextIntegrationTests {
 
     static void initialize() {
         if (owner != null) return;
-        org.flywaydb.core.Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()).load().migrate();
+        org.flywaydb.core.Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .placeholders(java.util.Map.of("db_scope_key", SCOPE_KEY)).load().migrate();
         owner = new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
         owner.execute("create role olarize_identity_provisioner nologin nosuperuser nobypassrls");
         owner.execute("create role membership_operator login password 'synthetic-only' nosuperuser nobypassrls nocreatedb nocreaterole");
@@ -137,6 +142,9 @@ class CompanyContextIntegrationTests {
         owner.execute("alter function public.list_company_identity_memberships(text,uuid) owner to olarize_identity_provisioner_owner");
         owner.execute("alter function public.change_company_membership(text,uuid,text,text,text,bigint,bigint,text,uuid,text) owner to olarize_identity_provisioner_owner");
         owner.execute("alter function public.find_company_membership_change_retry(text,uuid,text,text,text,bigint,bigint,text,uuid) owner to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.list_company_identity_memberships_internal(text,uuid) owner to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.change_company_membership_internal(text,uuid,text,text,text,bigint,bigint,text,uuid,text) owner to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.find_company_membership_change_retry_internal(text,uuid,text,text,text,bigint,bigint,text,uuid) owner to olarize_identity_provisioner_owner");
         owner.execute("grant execute on function public.list_company_identity_memberships(text,uuid) to membership_runtime");
         owner.execute("grant execute on function public.change_company_membership(text,uuid,text,text,text,bigint,bigint,text,uuid,text) to membership_runtime");
         owner.execute("grant execute on function public.find_company_membership_change_retry(text,uuid,text,text,text,bigint,bigint,text,uuid) to membership_runtime");
@@ -153,6 +161,133 @@ class CompanyContextIntegrationTests {
     }
     String subject() { return "synthetic-" + java.util.UUID.randomUUID(); }
     tools.jackson.databind.JsonNode json(String value) { return new tools.jackson.databind.json.JsonMapper().readTree(value); }
+
+    @Test void restrictedRuntimeQueriesRequireCurrentSubjectAndCompanyContext() {
+        String currentSubject = subject();
+        UUID a = company(); UUID b = company(); UUID revoked = company();
+        UUID aMembership = membership(currentSubject, a, "ACTIVE", "employee.self.read");
+        membership(currentSubject, b, "ACTIVE", "employee.self.read");
+        membership(currentSubject, revoked, "REVOKED", "employee.self.read");
+        membership(subject(), a, "ACTIVE", "identity.admin");
+        var transactions = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+
+        assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from identity_membership", Integer.class)).isZero();
+        transactions.execute(status -> {
+            jdbc.queryForObject("select set_config('olarize.subject', ?, true)", String.class, currentSubject);
+            jdbc.queryForObject("select set_config('olarize.company_id', ?, true)", String.class, a.toString());
+            assertThat(jdbc.queryForObject("select count(*) from identity_membership", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+            scope.apply(jdbc, currentSubject, null);
+            assertThat(jdbc.queryForObject("select count(*) from identity_membership", Integer.class)).isEqualTo(2);
+            assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+            scope.apply(jdbc, currentSubject, a);
+            assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from identity_membership", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForList("select company_id from identity_membership", UUID.class)).containsExactly(a);
+            assertThat(jdbc.queryForObject("""
+                    select count(*) from organization_company company
+                    join identity_membership member on member.company_id = company.id
+                    """, Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from organization_company where id = ?", Integer.class, b)).isZero();
+            jdbc.queryForObject("select set_config('olarize.company_id', ?, true)", String.class, b.toString());
+            assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from identity_membership", Integer.class)).isZero();
+            return null;
+        });
+        assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+        assertThatThrownBy(() -> jdbc.update("update identity_membership set status = 'REVOKED' where id = ?", aMembership))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.update("""
+                insert into identity_membership(id,company_id,subject,permissions,status,version,created_at,updated_at)
+                values (?,?,?,ARRAY['employee.self.read'],'ACTIVE',1,now(),now())
+                """, UUID.randomUUID(), a, currentSubject))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+
+        owner.update("update identity_membership set status = 'REVOKED', version = version + 1 where id = ?", aMembership);
+        transactions.execute(status -> {
+            scope.apply(jdbc, currentSubject, a);
+            assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+            return null;
+        });
+        assertThatThrownBy(() -> transactions.execute(status -> {
+            scope.apply(jdbc, currentSubject, b);
+            assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isEqualTo(1);
+            throw new IllegalStateException("Synthetic rollback");
+        })).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
+    }
+
+    @Test void auditReferencesCannotCrossCompaniesAndRuntimeCannotOwnProtectedTables() {
+        UUID a = company(); UUID b = company();
+        UUID member = membership(subject(), a, "ACTIVE", "employee.self.read");
+        assertThatThrownBy(() -> owner.update("""
+                insert into identity_membership_audit(id,membership_id,company_id,subject,operator_name,action,
+                    reason,evidence,expected_version,result_version,result_status,idempotency_key,correlation_id,recorded_at)
+                values (?,?,?,'synthetic','operator','GRANT','Synthetic','Synthetic',0,1,'ACTIVE',?,?,now())
+                """, UUID.randomUUID(), member, b, UUID.randomUUID(), UUID.randomUUID()))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> owner.update("""
+                insert into identity_membership_change_audit(id,membership_id,company_id,subject,actor_subject,action,
+                    previous_permissions,next_permissions,next_status,reason,expected_actor_version,
+                    expected_target_version,result_version,result_permissions,result_status,idempotency_key,
+                    correlation_id,recorded_at)
+                values (?,?,?,'synthetic','actor','GRANT',ARRAY[]::text[],ARRAY['employee.self.read'],
+                    'ACTIVE','Synthetic',1,0,1,ARRAY['employee.self.read'],'ACTIVE',?,'synthetic',now())
+                """, UUID.randomUUID(), member, b, UUID.randomUUID()))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(owner.queryForObject("""
+                select count(*) from pg_class relation where relation.oid in
+                    ('public.organization_company'::regclass, 'public.identity_membership'::regclass,
+                     'public.identity_membership_audit'::regclass, 'public.identity_membership_change_audit'::regclass)
+                  and (not relation.relrowsecurity or not relation.relforcerowsecurity
+                       or pg_has_role('membership_runtime', relation.relowner, 'MEMBER'))
+                """, Integer.class)).isZero();
+        assertThat(owner.queryForObject("""
+                select rolsuper or rolbypassrls or rolcreatedb or rolcreaterole
+                from pg_roles where rolname = 'membership_runtime'
+                """, Boolean.class)).isFalse();
+        assertThat(owner.queryForObject("""
+                select pg_has_role('membership_runtime', 'olarize_identity_provisioner', 'MEMBER')
+                """, Boolean.class)).isFalse();
+        assertThat(owner.queryForObject("""
+                select has_table_privilege('membership_runtime', 'olarize_private.scope_signing_key', 'SELECT')
+                """, Boolean.class)).isFalse();
+    }
+
+    @Test void runtimeDatabaseCredentialCannotForgeAdministratorScope() {
+        UUID companyId = company();
+        String administrator = subject();
+        String ordinaryUser = subject();
+        membership(administrator, companyId, "ACTIVE", "identity.admin");
+        membership(ordinaryUser, companyId, "ACTIVE", "employee.self.read");
+        var transactions = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+
+        assertThatThrownBy(() -> transactions.execute(status -> {
+            jdbc.queryForObject("select set_config('olarize.subject', ?, true)", String.class, administrator);
+            jdbc.queryForObject("select set_config('olarize.company_id', ?, true)", String.class, companyId.toString());
+            return jdbc.queryForObject("select count(*) from public.list_company_identity_memberships(?, ?)",
+                    Integer.class, administrator, companyId);
+        })).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> transactions.execute(status -> {
+            scope.apply(jdbc, ordinaryUser, companyId);
+            return jdbc.queryForObject("select count(*) from public.list_company_identity_memberships(?, ?)",
+                    Integer.class, administrator, companyId);
+        })).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.queryForObject(
+                "select count(*) from public.list_company_identity_memberships_internal(?, ?)",
+                Integer.class, administrator, companyId))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        transactions.execute(status -> {
+            scope.apply(jdbc, administrator, companyId);
+            assertThat(jdbc.queryForObject("select count(*) from public.list_company_identity_memberships(?, ?)",
+                    Integer.class, administrator, companyId)).isEqualTo(2);
+            return null;
+        });
+    }
+
     String token(String subject) throws Exception {
         String variation = "valid";
         Instant now = Instant.now();

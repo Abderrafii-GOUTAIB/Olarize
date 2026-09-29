@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
@@ -42,6 +43,7 @@ import static org.assertj.core.api.Assertions.*;
 
 @Testcontainers
 class CompanyProvisioningIntegrationTests {
+    static final String SCOPE_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
             DockerImageName.parse("pgvector/pgvector:0.8.6-pg17").asCompatibleSubstituteFor("postgres"))
             .waitingFor(Wait.forListeningPort());
@@ -53,7 +55,8 @@ class CompanyProvisioningIntegrationTests {
     }
 
     @BeforeAll static void initialize() {
-        Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()).load().migrate();
+        Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .placeholders(Map.of("db_scope_key", SCOPE_KEY)).load().migrate();
         owner = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
         owner.execute("create role olarize_company_provisioner nologin nosuperuser nobypassrls");
         for (String user : new String[]{"operator_one", "operator_two", "web_runtime"}) {
@@ -63,7 +66,7 @@ class CompanyProvisioningIntegrationTests {
         owner.execute("grant usage on schema public to olarize_company_provisioner, web_runtime");
         owner.execute("grant select on organization_company, organization_company_creation to olarize_company_provisioner");
         owner.execute("grant execute on function public.provision_company(uuid, text, text, uuid, uuid) to olarize_company_provisioner");
-        owner.execute("grant select on organization_company to web_runtime");
+        owner.execute("grant select on organization_company, identity_membership to web_runtime");
     }
 
     CompanyRegistrationJdbcRepository store(String user) { return new CompanyRegistrationJdbcRepository(source(user)); }
@@ -161,21 +164,43 @@ class CompanyProvisioningIntegrationTests {
     @Import(CompanyLookupJdbcRepository.class)
     static class LookupConfiguration {
         @Bean JdbcTemplate jdbc(DataSource source) { return new JdbcTemplate(source); }
+        @Bean com.olarize.platform.api.DatabaseScopeSigner scope() {
+            return new com.olarize.platform.api.DatabaseScopeSigner(SCOPE_KEY);
+        }
         @Bean PlatformTransactionManager transactions(DataSource source) { return new DataSourceTransactionManager(source); }
     }
 
     @Test void publicLookupUsesVerifiedScopeAndPooledTransactionsDoNotLeakContext() {
         var a = store("operator_one").register(request(UUID.randomUUID()), UUID.randomUUID());
         var b = store("operator_one").register(request(UUID.randomUUID()), UUID.randomUUID());
+        String verifiedSubject = "synthetic-lookup-subject";
+        for (UUID companyId : new UUID[]{a.id(), b.id()}) {
+            owner.update("""
+                    insert into identity_membership(id,company_id,subject,permissions,status,version,created_at,updated_at)
+                    values (?,?,?,ARRAY['employee.self.read'],'ACTIVE',1,now(),now())
+                    """, UUID.randomUUID(), companyId, verifiedSubject);
+        }
         var config = new HikariConfig();
         config.setJdbcUrl(POSTGRES.getJdbcUrl()); config.setUsername("web_runtime"); config.setPassword(PASSWORD); config.setMaximumPoolSize(1);
         try (var pool = new HikariDataSource(config); var context = new AnnotationConfigApplicationContext()) {
             AtomicReference<UUID> authorized = new AtomicReference<>(a.id());
             context.registerBean(DataSource.class, () -> pool);
-            context.registerBean(CompanyReadAuthorizationPort.class, () -> id -> id.equals(authorized.get()));
+            context.registerBean(CompanyReadAuthorizationPort.class,
+                    () -> id -> id.equals(authorized.get()) ? Optional.of(verifiedSubject) : Optional.empty());
             context.register(LookupConfiguration.class);
             context.refresh();
             CompanyLookupPort lookup = context.getBean(CompanyLookupPort.class);
+            var directRead = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
+            var database = context.getBean(JdbcTemplate.class);
+            var scope = context.getBean(com.olarize.platform.api.DatabaseScopeSigner.class);
+            directRead.execute(status -> {
+                scope.apply(database, verifiedSubject, a.id());
+                assertThat(database.queryForObject("select count(*) from identity_membership", Integer.class))
+                        .as("selected-company membership only").isEqualTo(1);
+                assertThat(database.queryForObject("select count(*) from organization_company", Integer.class))
+                        .as("company visible with active membership").isEqualTo(1);
+                return null;
+            });
             assertThat(lookup.find(a.id())).contains(a);
             assertThat(lookup.find(b.id())).isEmpty();
             var jdbc = context.getBean(JdbcTemplate.class);
@@ -184,10 +209,14 @@ class CompanyProvisioningIntegrationTests {
             assertThat(lookup.find(b.id())).contains(b);
             assertThat(lookup.find(a.id())).isEmpty();
             var transaction = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
+            AtomicReference<Integer> rolledBackConnection = new AtomicReference<>();
             assertThatThrownBy(() -> transaction.execute(status -> {
-                jdbc.queryForObject("select set_config('olarize.company_id', ?, true)", String.class, a.id().toString());
+                rolledBackConnection.set(jdbc.queryForObject("select pg_backend_pid()", Integer.class));
+                scope.apply(jdbc, verifiedSubject, a.id());
+                assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isEqualTo(1);
                 throw new IllegalStateException("Synthetic rollback");
             })).isInstanceOf(IllegalStateException.class);
+            assertThat(jdbc.queryForObject("select pg_backend_pid()", Integer.class)).isEqualTo(rolledBackConnection.get());
             assertThat(jdbc.queryForObject("select count(*) from organization_company", Integer.class)).isZero();
             authorized.set(null);
             assertThat(lookup.find(b.id())).isEmpty();

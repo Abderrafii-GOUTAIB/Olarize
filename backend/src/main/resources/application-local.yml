@@ -12,12 +12,14 @@ spring:
     password: ${DB_PASSWORD:${LOCAL_RUNTIME_PASSWORD:${POSTGRES_PASSWORD}}}
   flyway:
     enabled: true
+    out-of-order: true
     url: ${FLYWAY_URL:${DB_URL:jdbc:postgresql://localhost:${POSTGRES_PORT:5433}/${POSTGRES_DB:olarize}}}
     user: ${FLYWAY_USER:${POSTGRES_USER:olarize}}
     password: ${FLYWAY_PASSWORD:${POSTGRES_PASSWORD}}
     locations: classpath:db/migration,classpath:db/local
     placeholders:
       local_runtime_password: ${LOCAL_RUNTIME_PASSWORD:${DB_PASSWORD:${POSTGRES_PASSWORD}}}
+      db_scope_key: ${DB_SCOPE_KEY}
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:${BACKEND_PORT:8080}}

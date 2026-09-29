@@ -8,6 +8,7 @@ import com.olarize.identity.domain.model.Membership;
 import com.olarize.organization.application.port.in.CompanyLookupPort;
 import com.olarize.organization.application.port.in.CompanyReadAuthorizationPort;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -28,10 +29,12 @@ public class CurrentCompanyAccessService implements CompanyAccessUseCase, Compan
     @Override public CompanyContext resolve(UUID requestedCompany) {
         return context(Membership.select(memberships.activeFor(subject.require()), requestedCompany));
     }
-    @Override public boolean mayRead(UUID companyId) {
-        if (companyId == null) return false;
-        return memberships.activeFor(subject.require()).stream()
-                .anyMatch(membership -> membership.active() && membership.companyId().equals(companyId));
+    @Override public Optional<String> verifiedSubjectFor(UUID companyId) {
+        if (companyId == null) return Optional.empty();
+        String currentSubject = subject.require();
+        return memberships.activeFor(currentSubject).stream()
+                .anyMatch(membership -> membership.active() && membership.companyId().equals(companyId))
+                ? Optional.of(currentSubject) : Optional.empty();
     }
     private CompanyContext context(Membership membership) {
         var company = companies.find(membership.companyId()).orElseThrow(com.olarize.identity.domain.exception.CompanyAccessDenied::new);

@@ -15,7 +15,9 @@ flowchart TD
     AdminAPI[Membership admin API<br/>list · preview · confirm]
     KeycloakAdmin[Keycloak admin API<br/>verify exact user ID]
     Change[Membership change<br/>version + audit]
-    DB[(PostgreSQL with RLS)]
+    DB[(PostgreSQL with enforced company RLS)]
+    Scope[Signed subject + selected company<br/>transaction-local database context]
+    ScopeKey[Private PostgreSQL scope key]
     ProvisionCompany[Restricted provision-company command]
     ProvisionMembership[Restricted provision-membership command]
 
@@ -24,8 +26,10 @@ flowchart TD
     API -->|GET /api/v1/identity| User
     API -->|GET /api/v1/identity/memberships| Memberships
     API -->|GET /api/v1/identity/company-context| Company
-    Memberships <--> DB
-    Company <--> DB
+    Memberships -->|signed subject; own active rows only| DB
+    Company --> Scope
+    Scope -->|proof + current active membership required| DB
+    ScopeKey -->|verify proof| DB
     Admin -->|GET memberships| AdminAPI
     Admin -->|POST exact preview| AdminAPI
     AdminAPI -->|verify grant/reactivation target| KeycloakAdmin
@@ -105,7 +109,7 @@ sequenceDiagram
     KC-->>User: Signed access token
     User->>API: GET /api/v1/identity/memberships (Bearer token)
     API->>Identity: Validate token and resolve token subject
-    Identity->>DB: Read active memberships under RLS
+    Identity->>DB: Sign verified subject for this transaction; read own active memberships
     DB-->>Identity: Active company IDs and permissions
     Identity-->>API: Membership list
     API-->>User: Active memberships
@@ -113,14 +117,14 @@ sequenceDiagram
     API->>Identity: Resolve the requested active membership
     Identity->>DB: Recheck current membership and permissions
     Identity->>Org: Look up the authorized company
-    Org->>DB: Read company under trusted transaction scope
+    Org->>DB: Sign verified subject and company for this transaction; read company under RLS
     DB-->>Org: Company identity
     Org-->>Identity: Company identity
     Identity-->>API: Current company context
     API-->>User: Company ID, name and permissions
 ```
 
-The API derives identity from the verified token. A requested company ID selects a target but does not grant access. Membership changes are rechecked on each request. If there is one active membership, company context can be selected without a `companyId`; with multiple memberships the caller must specify one.
+The API derives identity from the verified token. A requested company ID selects a target but does not grant access. PostgreSQL checks the signed transaction scope and requires a current active membership for its subject and selected company. The context clears when the transaction commits or rolls back. Membership changes are rechecked on each request. If there is one active membership, company context can be selected without a `companyId`; with multiple memberships the caller must specify one.
 
 ## Feature status and how to check
 
@@ -130,6 +134,7 @@ The API derives identity from the verified token. A requested company ID selects
 | ORG-001 company provisioning | Implemented locally; production operator setup remains pending | `./scripts/verify-backend.sh` includes PostgreSQL authorization, audit, retry and failure tests. | Follow [company provisioning](company-provisioning.md). This command writes company and audit rows; use a synthetic company and the restricted operator credential only. |
 | EMP-001 membership list and company context | Implemented locally; production identity-operator setup remains pending | `./scripts/verify-backend.sh` includes signed-token HTTP and PostgreSQL membership tests. | Start the local stack and sign into Swagger as `olarize-demo-admin` (setup in [local authentication](authentication.md)). `GET /api/v1/identity/memberships` returns the seeded demo company membership; `GET /api/v1/identity/company-context` returns its company and permissions. The local demo member has an ordinary `EMPLOYEE` membership for demonstrating role-specific results. |
 | IAM-001 company membership administration | Implemented locally; production identity-admin authority remains gated by OD-03 | `./scripts/verify-backend.sh` exercises list, grant, role change, reactivation, revocation, provider failures, audit rollback, retries, concurrency and next-request permissions with PostgreSQL Testcontainers and synthetic signed tokens. Generated Swagger declares `profile.read` on the company membership list, preview and confirmation operations so it sends the authorized access token. The persistence classes use searchable `JdbcRepository` names and `MembershipJdbcMapper` handles SQL rows. | Sign into local Swagger as `olarize-demo-admin`. Use the company ID returned by `GET /api/v1/identity/memberships` to list that company's memberships, then copy the chosen row's `userId` into the preview request. The seeded ordinary member supports a role-change preview. New grants and reactivations need the local Keycloak admin service account described in [membership administration](membership-administration.md). This synthetic local identity-admin record is not production authority. |
+| IAM-002 PostgreSQL company isolation | Implemented for current organization and identity tables using a signed database scope | `./scripts/verify-backend.sh` runs restricted-runtime PostgreSQL tests for missing/forged scope, administrator impersonation, cross-company reads, joins, aggregates, revocation, audit references, transaction cleanup and role privileges. | In local Swagger, sign in as `olarize-demo-admin`; the existing membership and company-context endpoints return the seeded Demo Morocco SARL data. Sign in as a user without that company membership to check access denial. IAM-002 adds no new HTTP endpoint; see [company isolation](company-isolation.md). |
 | Employee records, leave, attendance, payroll, documents, product AI and frontend | Not implemented | No feature test exists yet | Track these in the requirements and task files; do not treat a planned flow as usable functionality. |
 
 The local Swagger integration check starts a disposable PostgreSQL container for both the API datasource and Flyway migrations. CI does not need the developer's database on `localhost:5433`; a missing local database no longer prevents the Swagger contract tests from starting.
@@ -142,7 +147,7 @@ From the repository root, with Docker available:
 ./scripts/verify-backend.sh
 ```
 
-This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current recorded IAM-001 evidence is in [task 006](../.instructions/tasks/006-membership-administration.md); EMP-001 evidence is in [task 005](../.instructions/tasks/005-company-context.md). The command reruns checks against your current checkout.
+This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current recorded IAM-002 evidence is in [task 007](../.instructions/tasks/007-postgresql-company-isolation.md); IAM-001 evidence is in [task 006](../.instructions/tasks/006-membership-administration.md); EMP-001 evidence is in [task 005](../.instructions/tasks/005-company-context.md). The command reruns checks against your current checkout.
 
 For hands-on API checks:
 

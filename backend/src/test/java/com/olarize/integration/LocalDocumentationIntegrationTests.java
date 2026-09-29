@@ -38,6 +38,10 @@ class LocalDocumentationIntegrationTests {
         properties.add("spring.flyway.user", POSTGRES::getUsername);
         properties.add("spring.flyway.password", POSTGRES::getPassword);
         properties.add("spring.flyway.placeholders.local_runtime_password", () -> "synthetic-local-runtime-only");
+        properties.add("spring.flyway.placeholders.db_scope_key",
+                () -> "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        properties.add("olarize.identity.database-scope-key",
+                () -> "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     }
 
     @LocalServerPort int port;
