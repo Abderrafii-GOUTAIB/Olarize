@@ -1,6 +1,7 @@
 package com.olarize.identity.adapter.in.web;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -10,7 +11,9 @@ import java.util.UUID;
 public final class ConfirmMembershipChangeRequest {
     @NotBlank @Size(max = 8192) private String previewToken;
     @NotNull @PositiveOrZero private Long expectedTargetVersion;
-    @NotNull private UUID idempotencyKey;
+    @NotNull
+    @Schema(description = "A new UUID for this change. Reuse the same UUID only when retrying this exact confirmation, so the change is applied once.")
+    private UUID idempotencyKey;
     @NotNull private Boolean confirm;
 
     public String getPreviewToken() { return previewToken; }

@@ -30,6 +30,10 @@ Run focused domain and integration tests, then `./scripts/verify-backend.sh`. Ad
 
 **2026-09-29:** `./scripts/verify-backend.sh` passed: 76 tests, 0 failures, 0 errors, 0 skipped. The 16 `CompanyContextIntegrationTests` cases use Testcontainers PostgreSQL, signed Keycloak-style HTTP tokens and a synthetic Keycloak admin server; they cover grants, role changes, reactivation, scope, preview/confirmation, provider outage, audit rollback, idempotent retries, concurrent grants and next-request permission changes. The jar packaged successfully. Independent review found a P2 gap for update/reactivation coverage; both flows were added, and focused re-review confirmed the gap is closed with no remaining finding. Production identity-administrator authority remains gated by OD-03; no live Keycloak or production check was run.
 
+**2026-09-29 API naming update:** The public identity response uses `currentUserId`. Company membership rows and preview requests/responses use `userId`, so the selected row's value can be copied directly into a preview. Swagger explains the `idempotencyKey` retry behavior. `./scripts/verify-backend.sh -Dtest=FoundationIntegrationTests,CompanyContextIntegrationTests,LocalDocumentationIntegrationTests` passed: 40 tests, 0 failures or errors. The running IntelliJ backend needs a restart to serve the revised JSON contract.
+
+**2026-09-29 persistence naming:** Identity and organization persistence classes now end in `JdbcRepository`; shared membership SQL row mapping is in `MembershipJdbcMapper`. Focused membership/company integration checks passed (24 tests), and `./scripts/verify-backend.sh` passed the final revision (77 tests, 0 failures or errors). Independent focused review found no persistence wiring or mapping issue.
+
 ## Completion notes
 
 Production identity-administrator grant authority remains blocked by OD-03. Tests use synthetic subjects and provider fixtures. Jira metadata is recorded in `.github/jira/OLARIZE-19.json` for the approved PR workflow.

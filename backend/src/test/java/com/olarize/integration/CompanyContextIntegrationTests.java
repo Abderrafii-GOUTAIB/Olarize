@@ -231,7 +231,7 @@ class CompanyContextIntegrationTests {
         String actorToken = token(actor);
         String base = "/api/v1/companies/" + company;
         String previewBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
-                "targetSubject", target, "roleBundle", "HR_ADMIN", "reason", "Synthetic onboarding"));
+                "userId", target, "roleBundle", "HR_ADMIN", "reason", "Synthetic onboarding"));
 
         var previewResponse = authenticatedPost(base + "/membership-change-previews", actorToken, previewBody);
         assertThat(previewResponse.statusCode()).isEqualTo(201);
@@ -240,6 +240,8 @@ class CompanyContextIntegrationTests {
         assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject=?", Integer.class, company, target)).isZero();
 
         var preview = json(previewResponse.body());
+        assertThat(preview.get("userId").stringValue()).isEqualTo(target);
+        assertThat(preview.has("targetSubject")).isFalse();
         String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
                 "previewToken", preview.get("previewToken").stringValue(), "expectedTargetVersion", 0,
                 "idempotencyKey", java.util.UUID.randomUUID().toString(), "confirm", true));
@@ -247,7 +249,10 @@ class CompanyContextIntegrationTests {
         assertThat(first.statusCode()).isEqualTo(200);
         assertThat(first.body()).contains(target, "ACTIVE", "HR_ADMIN", "employee.read", "contract.write")
                 .doesNotContain("payroll.read");
-        String id = json(first.body()).get("membershipId").stringValue();
+        var confirmed = json(first.body());
+        assertThat(confirmed.get("userId").stringValue()).isEqualTo(target);
+        assertThat(confirmed.has("subject")).isFalse();
+        String id = confirmed.get("membershipId").stringValue();
         var audit = owner.queryForMap("select * from identity_membership_change_audit where membership_id=?", java.util.UUID.fromString(id));
         assertThat(audit).containsEntry("actor_subject", actor).containsEntry("action", "GRANT")
                 .containsEntry("previous_status", null).containsEntry("next_status", "ACTIVE")
@@ -267,7 +272,7 @@ class CompanyContextIntegrationTests {
 
         String otherTarget = subject();
         var otherPreview = authenticatedPost(base + "/membership-change-previews", actorToken,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", otherTarget,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", otherTarget,
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic conflicting retry")));
         var otherClaims = json(otherPreview.body());
         String conflicting = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
@@ -288,25 +293,34 @@ class CompanyContextIntegrationTests {
         var listed = authenticatedGet(base + "/memberships", token);
         assertThat(listed.statusCode()).isEqualTo(200);
         assertThat(listed.body()).contains(actor, ordinary).doesNotContain(foreignAdmin, companyB.toString());
+        var rows = json(listed.body());
+        boolean foundOrdinary = false;
+        for (int i = 0; i < rows.size(); i++) {
+            var row = rows.get(i);
+            assertThat(row.has("userId")).isTrue();
+            assertThat(row.has("subject")).isFalse();
+            if (ordinary.equals(row.get("userId").stringValue())) foundOrdinary = true;
+        }
+        assertThat(foundOrdinary).isTrue();
         assertThat(authenticatedGet("/api/v1/companies/" + companyB + "/memberships", token).statusCode()).isEqualTo(403);
 
         var ordinaryActor = authenticatedPost(base + "/membership-change-previews", token(ordinary),
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", subject(),
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", subject(),
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic reason")));
         assertThat(ordinaryActor.statusCode()).isEqualTo(403);
         var selfEdit = authenticatedPost(base + "/membership-change-previews", token,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", actor,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", actor,
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic reason")));
         assertThat(selfEdit.statusCode()).isEqualTo(409);
         var foreignReference = authenticatedPost(base + "/membership-change-previews", token,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", foreignAdmin,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", foreignAdmin,
                         "reason", "Synthetic revoke")));
         assertThat(foreignReference.statusCode()).isEqualTo(409);
         assertThat(foreignReference.body()).doesNotContain(foreignAdmin, companyB.toString());
 
         var protectedAdmin = subject(); membership(protectedAdmin, companyA, "ACTIVE", "identity.admin");
         var editAdmin = authenticatedPost(base + "/membership-change-previews", token,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", protectedAdmin,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", protectedAdmin,
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic reason")));
         assertThat(editAdmin.statusCode()).isEqualTo(409);
         assertThat(owner.queryForObject("select count(*) from identity_membership_change_audit where company_id=?", Integer.class, companyA)).isZero();
@@ -323,7 +337,7 @@ class CompanyContextIntegrationTests {
 
         String base = "/api/v1/companies/" + company;
         var preview = authenticatedPost(base + "/membership-change-previews", actorToken,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", target,
                         "roleBundle", "MANAGER", "reason", "Synthetic role change")));
         assertThat(preview.statusCode()).isEqualTo(201);
         assertThat(preview.body()).contains("UPDATE", "employee.direct-reports.read").doesNotContain("employee.self.read");
@@ -356,7 +370,7 @@ class CompanyContextIntegrationTests {
         String context = "/api/v1/identity/company-context?companyId=" + company;
         assertThat(authenticatedGet(context, targetToken).statusCode()).isEqualTo(403);
 
-        String previewBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+        String previewBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", target,
                 "roleBundle", "MANAGER", "reason", "Synthetic reactivation"));
         IDENTITY_PROVIDER_UNAVAILABLE.set(true);
         HttpResponse<String> unavailable;
@@ -397,11 +411,11 @@ class CompanyContextIntegrationTests {
         IDENTITY_PROVIDER_UNAVAILABLE.set(true);
         try {
             var grant = authenticatedPost(base + "/membership-change-previews", token,
-                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", newTarget,
+                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", newTarget,
                             "roleBundle", "EMPLOYEE", "reason", "Synthetic grant")));
             assertThat(grant.statusCode()).isEqualTo(503);
             var revokePreview = authenticatedPost(base + "/membership-change-previews", token,
-                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", existing,
+                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", existing,
                             "reason", "Synthetic revocation")));
             assertThat(revokePreview.statusCode()).isEqualTo(201);
             var preview = json(revokePreview.body());
@@ -417,7 +431,7 @@ class CompanyContextIntegrationTests {
             IDENTITY_PROVIDER_UNAVAILABLE.set(false);
         }
         var missingSubject = authenticatedPost(base + "/membership-change-previews", token,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", "not-found",
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", "not-found",
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic missing subject")));
         assertThat(missingSubject.statusCode()).isEqualTo(409);
         assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject='not-found'",
@@ -430,10 +444,10 @@ class CompanyContextIntegrationTests {
         String token = token(actor); String base = "/api/v1/companies/" + company;
         membership(actor, company, "ACTIVE", "identity.admin");
         var firstPreview = authenticatedPost(base + "/membership-change-previews", token,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", target,
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic concurrent grant")));
         var secondPreview = authenticatedPost(base + "/membership-change-previews", token,
-                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", target,
                         "roleBundle", "EMPLOYEE", "reason", "Synthetic concurrent grant")));
         String firstBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
                 "previewToken", json(firstPreview.body()).get("previewToken").stringValue(), "expectedTargetVersion", 0,
@@ -472,7 +486,7 @@ class CompanyContextIntegrationTests {
         try {
             String base = "/api/v1/companies/" + company; String token = token(actor);
             var previewResponse = authenticatedPost(base + "/membership-change-previews", token,
-                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("userId", target,
                             "roleBundle", "EMPLOYEE", "reason", "Synthetic audit rollback")));
             var claims = json(previewResponse.body());
             String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
