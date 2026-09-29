@@ -1,0 +1,23 @@
+{
+  "ifResourceExists": "SKIP",
+  "users": [
+    {
+      "id": "c0000000-0000-4000-8000-000000000011",
+      "username": "olarize-demo-admin",
+      "enabled": true,
+      "email": "olarize-demo-admin@olarize.invalid",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Administrator"
+    },
+    {
+      "id": "c0000000-0000-4000-8000-000000000021",
+      "username": "olarize-demo-employee",
+      "enabled": true,
+      "email": "olarize-demo-employee@olarize.invalid",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Employee"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ Olarize uses self-hosted Keycloak 26.7.4 and Spring Security's OAuth2 resource s
 
 ## Start locally
 
-On first setup, copy .env.example to .env and replace all three example passwords with distinct alphanumeric values. Preserve an existing .env. The current workstation already has generated local Keycloak passwords in this ignored file.
+On first setup, copy .env.example to .env and replace the example passwords with distinct alphanumeric values. Preserve an existing .env. The current workstation already has generated local Keycloak passwords in this ignored file. Set `LOCAL_RUNTIME_PASSWORD` to a value different from the PostgreSQL bootstrap/migration password.
 
 ```sh
 docker compose --profile app up -d --build --wait
@@ -12,7 +12,7 @@ docker compose --profile app up -d --build --wait
 
 For IntelliJ, start `docker compose up -d db keycloak --wait`, select the local Spring profile, and run OlarizeApplication. Stop the Compose backend first if it occupies port 8080. No credentials need to be copied into the IDE.
 
-Keycloak administration: http://localhost:8081/admin/ (username admin; password KEYCLOAK_ADMIN_PASSWORD in .env). Select the olarize realm. Create a synthetic local user, complete the profile, and set a password through Credentials. The bootstrap administrator belongs to the master realm and is not an HR user. There are no committed user passwords or default HR administrators.
+Keycloak administration: http://localhost:8081/admin/ (username admin; password KEYCLOAK_ADMIN_PASSWORD in .env). Select the olarize realm. Local Swagger data is seeded into PostgreSQL on the first local-profile startup and persists in the `olarize_pgdata` volume. To sign in as the seeded company identity administrator, open **Realm settings → Action → Partial import** and import `infra/keycloak/local-demo-users.json` with duplicate users set to **Skip**. Then open `Users`, select `olarize-demo-admin`, and set a local password under **Credentials**. This file contains no password. The bootstrap administrator belongs to the master realm and is not an HR user. The seeded `identity.admin` permission exists only in the local synthetic database; do not copy these rows into a shared environment.
 
 The local realm uses sslRequired=none only for HTTP development. Never use that setting in a shared deployment. The local realm imports once; Keycloak skips import when that realm already exists. Editing JSON does not update an existing realm. Apply deliberate configuration changes through administration or a migration; never delete volumes just to reimport. Password environment changes do not rotate existing database/admin credentials.
 

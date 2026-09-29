@@ -95,7 +95,121 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/memberships:
+    get:
+      operationId: listCompanyMemberships
+      summary: List memberships for a company
+      description: Lists membership subjects, current status, fixed role bundle, explicit permissions and version. Requires profile.read plus an active identity.admin membership in the selected company. The company ID selects scope; it does not grant access. Identity administrators are visible but cannot be changed through this API.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+      responses:
+        '200':
+          description: Current memberships in the authorized company.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ManagedMembership'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: The actor is not an active identity administrator in this company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/membership-change-previews:
+    post:
+      operationId: previewMembershipChange
+      summary: Preview a company membership change
+      description: Previews an exact grant, role change, reactivation or revocation. Grants and reactivations verify the target Keycloak subject. The signed preview binds the actor, company, target, action, permissions, versions and reason; it expires after 30 minutes and does not change membership state. Only HR_ADMIN, MANAGER, EMPLOYEE and PAYROLL_OPERATOR bundles are assignable. identity.admin cannot be granted or edited.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MembershipChangePreviewRequest'}
+      responses:
+        '201':
+          description: Exact preview for explicit confirmation; no membership state has changed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MembershipChangePreview'}
+        '400':
+          description: The preview request is malformed or contains an unknown field or role bundle.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: The actor is not an active identity administrator in this company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: The requested target or membership transition is not allowed.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503':
+          description: Keycloak could not verify a target subject needed for a grant or reactivation.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/membership-changes/confirm:
+    post:
+      operationId: confirmMembershipChange
+      summary: Confirm a company membership change
+      description: Applies only the exact signed preview after checking that it is unexpired and the actor and target versions still match. Requires confirm=true and an idempotency key. Membership and before/after audit commit atomically; permission reductions and revocation apply on the target's next request.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConfirmMembershipChangeRequest'}
+      responses:
+        '200':
+          description: The applied membership result. Repeating the same key and payload returns this result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedMembership'}
+        '400':
+          description: Confirmation body is malformed, contains unknown fields, or confirm is not true.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: The actor is no longer an active identity administrator in this company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: The preview is expired, stale or mismatched, or an idempotency key was reused with different input.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503':
+          description: Keycloak could not verify a target subject needed for a grant or reactivation.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
 components:
+  parameters:
+    CompanyId:
+      name: companyId
+      in: path
+      required: true
+      description: Company UUID from the signed-in user's active membership context. It selects a requested scope but does not grant access.
+      schema: {type: string, format: uuid}
   securitySchemes:
     keycloak:
       type: oauth2
@@ -119,6 +233,55 @@ components:
           uniqueItems: true
           items: {type: string}
         version: {type: integer, format: int64, minimum: 1}
+    ManagedMembership:
+      type: object
+      required: [membershipId, subject, companyId, status, permissions, version]
+      additionalProperties: false
+      properties:
+        membershipId: {type: string, format: uuid}
+        subject: {type: string, minLength: 1}
+        companyId: {type: string, format: uuid}
+        status: {type: string, enum: [ACTIVE, REVOKED]}
+        roleBundle: {type: string, nullable: true, enum: [HR_ADMIN, MANAGER, EMPLOYEE, PAYROLL_OPERATOR]}
+        permissions:
+          type: array
+          uniqueItems: true
+          items: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+    MembershipChangePreviewRequest:
+      type: object
+      required: [targetSubject, reason]
+      additionalProperties: false
+      properties:
+        targetSubject: {type: string, minLength: 1, maxLength: 255, description: Exact opaque Keycloak subject; never an email or username.}
+        roleBundle: {type: string, nullable: true, enum: [HR_ADMIN, MANAGER, EMPLOYEE, PAYROLL_OPERATOR], description: Omit only to revoke an active ordinary membership.}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    MembershipChangePreview:
+      type: object
+      required: [previewToken, previewId, companyId, targetSubject, action, permissions, actorVersion, targetVersion, expiresAt]
+      additionalProperties: false
+      properties:
+        previewToken: {type: string, description: Signed opaque token binding the exact proposed change.}
+        previewId: {type: string, format: uuid}
+        companyId: {type: string, format: uuid}
+        targetSubject: {type: string}
+        action: {type: string, enum: [GRANT, UPDATE, REACTIVATE, REVOKE]}
+        roleBundle: {type: string, nullable: true, enum: [HR_ADMIN, MANAGER, EMPLOYEE, PAYROLL_OPERATOR]}
+        permissions:
+          type: array
+          items: {type: string}
+        actorVersion: {type: integer, format: int64, minimum: 1}
+        targetVersion: {type: integer, format: int64, minimum: 0}
+        expiresAt: {type: string, format: date-time}
+    ConfirmMembershipChangeRequest:
+      type: object
+      required: [previewToken, expectedTargetVersion, idempotencyKey, confirm]
+      additionalProperties: false
+      properties:
+        previewToken: {type: string}
+        expectedTargetVersion: {type: integer, format: int64, minimum: 0}
+        idempotencyKey: {type: string, format: uuid}
+        confirm: {type: boolean, enum: [true], description: Explicit confirmation of the exact preview.}
     Problem:
       type: object
       required: [type, title, status, detail, code, requestId]

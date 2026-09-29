@@ -49,6 +49,13 @@ olarize:
     jwk-set-uri: ${AUTH_JWK_SET_URI}
     audience: ${AUTH_AUDIENCE:olarize-api}
     client-id: ${AUTH_CLIENT_ID:olarize-web}
+  identity:
+    preview-secret: ${IDENTITY_PREVIEW_SECRET:${random.uuid}-${random.uuid}}
+  identity-provider:
+    admin-base-url: ${KEYCLOAK_ADMIN_BASE_URL:}
+    realm: ${KEYCLOAK_REALM:olarize}
+    client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:}
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:}
 
 springdoc:
   api-docs:
