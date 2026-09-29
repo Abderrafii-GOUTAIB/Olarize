@@ -3,8 +3,8 @@ package com.olarize.integration;
 import com.olarize.organization.application.port.in.CompanyLookupPort;
 import com.olarize.organization.application.port.in.CompanyReadAuthorizationPort;
 import com.olarize.organization.adapter.in.cli.ProvisionCompanyCommand;
-import com.olarize.organization.adapter.out.persistence.CompanyLookupPersistenceAdapter;
-import com.olarize.organization.adapter.out.persistence.CompanyRegistrationPersistenceAdapter;
+import com.olarize.organization.adapter.out.persistence.CompanyLookupJdbcRepository;
+import com.olarize.organization.adapter.out.persistence.CompanyRegistrationJdbcRepository;
 import com.olarize.organization.domain.model.CompanyRegistration;
 import com.olarize.organization.domain.exception.RegistrationConflict;
 import com.zaxxer.hikari.HikariConfig;
@@ -66,7 +66,7 @@ class CompanyProvisioningIntegrationTests {
         owner.execute("grant select on organization_company to web_runtime");
     }
 
-    CompanyRegistrationPersistenceAdapter store(String user) { return new CompanyRegistrationPersistenceAdapter(source(user)); }
+    CompanyRegistrationJdbcRepository store(String user) { return new CompanyRegistrationJdbcRepository(source(user)); }
     CompanyRegistration request(UUID key) { return new CompanyRegistration("شركة Synthetic", "Synthetic setup", key); }
 
     @Test void commandCreatesAuditedIdentityAndRetryReturnsOriginal() throws Exception {
@@ -123,7 +123,7 @@ class CompanyProvisioningIntegrationTests {
 
     @Test void ordinaryAndOwnerCredentialsCannotUseCommandAndRuntimeCannotWriteDirectly() {
         assertThatThrownBy(() -> store("web_runtime").register(request(UUID.randomUUID()), UUID.randomUUID())).isInstanceOf(SecurityException.class);
-        var privileged = new CompanyRegistrationPersistenceAdapter(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
+        var privileged = new CompanyRegistrationJdbcRepository(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
         assertThatThrownBy(() -> privileged.register(request(UUID.randomUUID()), UUID.randomUUID())).isInstanceOf(SecurityException.class);
         var runtime = new JdbcTemplate(source("web_runtime"));
         assertThatThrownBy(() -> runtime.update("insert into organization_company(id,name,created_at,updated_at) values (?, 'Synthetic', now(), now())", UUID.randomUUID()))
@@ -158,7 +158,7 @@ class CompanyProvisioningIntegrationTests {
 
     @TestConfiguration(proxyBeanMethods = false)
     @EnableTransactionManagement
-    @Import(CompanyLookupPersistenceAdapter.class)
+    @Import(CompanyLookupJdbcRepository.class)
     static class LookupConfiguration {
         @Bean JdbcTemplate jdbc(DataSource source) { return new JdbcTemplate(source); }
         @Bean PlatformTransactionManager transactions(DataSource source) { return new DataSourceTransactionManager(source); }

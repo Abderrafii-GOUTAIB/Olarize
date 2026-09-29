@@ -138,10 +138,10 @@ class FoundationIntegrationTests {
                 .GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    @Test void currentUserReturnsOnlyVerifiedSubject() throws Exception {
+    @Test void currentUserReturnsOnlyVerifiedUserId() throws Exception {
         var response = authenticatedGet("/api/v1/identity", token("valid"));
         assertThat(response.statusCode()).isEqualTo(200);
-        assertThat(response.body()).isEqualTo("{\"subject\":\"user-123\"}");
+        assertThat(response.body()).isEqualTo("{\"currentUserId\":\"user-123\"}");
         assertThat(response.headers().firstValue("cache-control").orElse("")).contains("no-store");
         assertThat(response.headers().firstValue("set-cookie")).isEmpty();
     }
@@ -185,7 +185,7 @@ class FoundationIntegrationTests {
 
     @Test void clientCannotSelectAnotherSubject() throws Exception {
         assertThat(authenticatedGet("/api/v1/identity?subject=other-user", token("valid")).body())
-                .isEqualTo("{\"subject\":\"user-123\"}");
+                .isEqualTo("{\"currentUserId\":\"user-123\"}");
     }
 
     @Test void flywayAppliedAndVectorOperationsWork() {

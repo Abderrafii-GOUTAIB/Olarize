@@ -1,7 +1,7 @@
 package com.olarize.organization.adapter.in.cli;
 
 import com.olarize.organization.application.service.ProvisionCompanyService;
-import com.olarize.organization.adapter.out.persistence.CompanyRegistrationPersistenceAdapter;
+import com.olarize.organization.adapter.out.persistence.CompanyRegistrationJdbcRepository;
 import com.olarize.organization.domain.exception.RegistrationConflict;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -46,7 +46,7 @@ public final class ProvisionCompanyCommand {
                     request.get("name").stringValue(), request.get("reason").stringValue(), key);
             var datasource = new DriverManagerDataSource(required(environment, "ORG_PROVISION_DB_URL"),
                     required(environment, "ORG_PROVISION_DB_USERNAME"), required(environment, "ORG_PROVISION_DB_PASSWORD"));
-            var company = new ProvisionCompanyService(new CompanyRegistrationPersistenceAdapter(datasource))
+            var company = new ProvisionCompanyService(new CompanyRegistrationJdbcRepository(datasource))
                     .execute(registration.name(), registration.reason(), key, correlation);
             output.println(JSON.writeValueAsString(Map.of("companyId", company.id().toString(),
                     "version", company.version(), "requestId", correlation.toString())));

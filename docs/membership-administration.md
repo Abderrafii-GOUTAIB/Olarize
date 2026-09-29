@@ -4,9 +4,9 @@ IAM-001 lets a company identity administrator list memberships and prepare an ex
 
 ## API
 
-- `GET /api/v1/companies/{companyId}/memberships` lists opaque Keycloak subjects, current status, role bundle, explicit permissions and version for the selected company.
-- `POST /api/v1/companies/{companyId}/membership-change-previews` accepts `targetSubject`, optional `roleBundle`, and `reason`. Omitting the bundle requests revocation. It returns a signed preview valid for 30 minutes and writes no membership state.
-- `POST /api/v1/companies/{companyId}/membership-changes/confirm` accepts the exact `previewToken`, `expectedTargetVersion`, a UUID `idempotencyKey`, and `confirm: true`. The API rechecks actor authorization, preview expiry and target version before changing anything.
+- `GET /api/v1/companies/{companyId}/memberships` lists each member's `userId` (their Keycloak user ID), current status, role bundle, explicit permissions and version for the selected company.
+- `POST /api/v1/companies/{companyId}/membership-change-previews` accepts `userId`, optional `roleBundle`, and `reason`. Copy `userId` from the selected row in `GET /api/v1/companies/{companyId}/memberships`; `GET /api/v1/identity` returns `currentUserId` for the signed-in administrator. Omitting the bundle requests revocation. The preview is valid for 30 minutes and writes no membership state.
+- `POST /api/v1/companies/{companyId}/membership-changes/confirm` accepts the exact `previewToken`, `expectedTargetVersion`, a UUID `idempotencyKey`, and `confirm: true`. Create a new key for each change; reuse it for an identical retry so the change is applied once. The API rechecks administrator authorization, preview expiry and target version before changing anything.
 
 Every route also requires a validated Keycloak token with `profile.read`. The selected company ID is only a requested scope; current active `identity.admin` membership is checked from PostgreSQL on every request. The target is an exact opaque Keycloak `sub`, never a username or email. Self-management and changes to any identity administrator are rejected. Identity-administrator grants and revocation stay in the controlled `provision-membership` procedure.
 

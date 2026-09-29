@@ -8,6 +8,8 @@ Use package-by-business-module under com.olarize: identity, organization, employ
 
 Expose deliberate public module APIs from `application/port/in` when another module needs them. Keep each business module under its module package, organized as `domain/{model,service,event,exception}`, `application/{port/in,port/out,service,command,query}`, and `adapter/{in/{web,messaging,cli},out/{persistence,messaging,external}}` as needed. Name application services with a `Service` suffix. Create only folders that contain real code; do not call another module's repository or import its implementation classes. Use identifiers and module ports rather than cross-module JPA object graphs. Keep shared types small; do not create a generic shared-service dumping ground. Add Spring Modulith verification for prohibited dependencies and cycles.
 
+Use searchable persistence suffixes: `JdbcRepository` for JDBC-backed classes, `JpaRepository` for Spring Data JPA interfaces, `JpaEntity` for JPA entity classes, and `Mapper` for extracted mapping classes. Match the suffix to the technology actually used; a JDBC class must not be named JPA. Keep simple one-off mappings in their owning class instead of creating empty mapper layers.
+
 Controllers validate transport input and call application services. Application services establish trusted context and transaction boundaries. Domain logic implements explicit rules. Infrastructure adapters handle persistence and providers. Prefer clear code over layers containing only pass-through methods.
 
 ## API and persistence

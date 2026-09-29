@@ -7,18 +7,18 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@Component
-public class CompanyLookupPersistenceAdapter implements CompanyLookupPort {
+@Repository
+public class CompanyLookupJdbcRepository implements CompanyLookupPort {
     private final JdbcTemplate database;
     private final ObjectProvider<CompanyReadAuthorizationPort> authorization;
     private final TransactionTemplate companyRead;
 
-    public CompanyLookupPersistenceAdapter(JdbcTemplate database, ObjectProvider<CompanyReadAuthorizationPort> authorization,
+    public CompanyLookupJdbcRepository(JdbcTemplate database, ObjectProvider<CompanyReadAuthorizationPort> authorization,
                              PlatformTransactionManager transactionManager) {
         this.database = database;
         this.authorization = authorization;

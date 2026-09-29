@@ -13,7 +13,7 @@ flowchart TD
     Company[Authorized company context]
     Admin[Company identity administrator]
     AdminAPI[Membership admin API<br/>list · preview · confirm]
-    KeycloakAdmin[Keycloak admin API<br/>verify exact subject]
+    KeycloakAdmin[Keycloak admin API<br/>verify exact user ID]
     Change[Membership change<br/>version + audit]
     DB[(PostgreSQL with RLS)]
     ProvisionCompany[Restricted provision-company command]
@@ -29,7 +29,7 @@ flowchart TD
     Admin -->|GET memberships| AdminAPI
     Admin -->|POST exact preview| AdminAPI
     AdminAPI -->|verify grant/reactivation target| KeycloakAdmin
-    KeycloakAdmin -->|subject exists / unavailable| AdminAPI
+    KeycloakAdmin -->|user exists / unavailable| AdminAPI
     AdminAPI -->|signed preview, no write| Admin
     Admin -->|confirm preview + idempotency key| AdminAPI
     AdminAPI -->|current actor/target checks| DB
@@ -40,7 +40,7 @@ flowchart TD
     ProvisionMembership -->|membership + audit receipt| DB
     LocalSeed[Local-profile synthetic company and memberships]
     LocalSeed -->|one-time Flyway seed; retained in volume| DB
-    LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin Keycloak subject]
+    LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin user ID]
     DemoAdmin -->|Bearer token in Swagger| AdminAPI
 
     Planned[Employee records, leave, attendance, payroll, documents, product AI and frontend]
@@ -61,15 +61,15 @@ sequenceDiagram
     participant Target as Target member
 
     Admin->>API: GET /api/v1/companies/{companyId}/memberships
-    API->>Identity: Resolve signed-token subject
+    API->>Identity: Read signed-in user ID from token
     Identity->>DB: Check current active identity.admin and list company members
     DB-->>API: Scoped membership list
-    API-->>Admin: Subjects, roles, permissions and versions
+    API-->>Admin: Member user IDs, roles, permissions and versions
 
     Admin->>API: POST membership-change-previews
     API->>Identity: Validate requested action and role bundle
     opt Grant or reactivation
-        Identity->>KC: Verify exact Keycloak subject
+        Identity->>KC: Verify exact Keycloak user ID
         KC-->>Identity: Exists, missing or unavailable
     end
     Identity-->>API: Signed exact preview, expires in 30 minutes
@@ -127,7 +127,7 @@ The API derives identity from the verified token. A requested company ID selects
 | Keycloak authentication and `GET /api/v1/identity` | Implemented | `./scripts/verify-backend.sh` | Start the local stack, sign in with a synthetic Keycloak user in local Swagger, then call `GET /api/v1/identity`. Or run `python3 scripts/smoke-keycloak.py` against a healthy local stack. |
 | ORG-001 company provisioning | Implemented locally; production operator setup remains pending | `./scripts/verify-backend.sh` includes PostgreSQL authorization, audit, retry and failure tests. | Follow [company provisioning](company-provisioning.md). This command writes company and audit rows; use a synthetic company and the restricted operator credential only. |
 | EMP-001 membership list and company context | Implemented locally; production identity-operator setup remains pending | `./scripts/verify-backend.sh` includes signed-token HTTP and PostgreSQL membership tests. | Start the local stack and sign into Swagger as `olarize-demo-admin` (setup in [local authentication](authentication.md)). `GET /api/v1/identity/memberships` returns the seeded demo company membership; `GET /api/v1/identity/company-context` returns its company and permissions. The local demo member has an ordinary `EMPLOYEE` membership for demonstrating role-specific results. |
-| IAM-001 company membership administration | Implemented locally; production identity-admin authority remains gated by OD-03 | `./scripts/verify-backend.sh` exercises list, grant, role change, reactivation, revocation, provider failures, audit rollback, retries, concurrency and next-request permissions with PostgreSQL Testcontainers and synthetic signed tokens. | Sign into local Swagger as `olarize-demo-admin`. Use the company ID returned by `GET /api/v1/identity/memberships` to call `GET /api/v1/companies/{companyId}/memberships`; it returns both seeded subjects. For writes, configure the local Keycloak admin service account per [membership administration](membership-administration.md), then preview and confirm a membership change. This synthetic local identity-admin record is not production authority. |
+| IAM-001 company membership administration | Implemented locally; production identity-admin authority remains gated by OD-03 | `./scripts/verify-backend.sh` exercises list, grant, role change, reactivation, revocation, provider failures, audit rollback, retries, concurrency and next-request permissions with PostgreSQL Testcontainers and synthetic signed tokens. Generated Swagger declares `profile.read` on the company membership list, preview and confirmation operations so it sends the authorized access token. The persistence classes use searchable `JdbcRepository` names and `MembershipJdbcMapper` handles SQL rows. | Sign into local Swagger as `olarize-demo-admin`. Use the company ID returned by `GET /api/v1/identity/memberships` to list that company's memberships, then copy the chosen row's `userId` into the preview request. The seeded ordinary member supports a role-change preview. New grants and reactivations need the local Keycloak admin service account described in [membership administration](membership-administration.md). This synthetic local identity-admin record is not production authority. |
 | Employee records, leave, attendance, payroll, documents, product AI and frontend | Not implemented | No feature test exists yet | Track these in the requirements and task files; do not treat a planned flow as usable functionality. |
 
 ## Run the checks
@@ -157,3 +157,9 @@ docker compose --profile app down
 ## Development workflow versus product flow
 
 Implementing code follows a separate workflow: approved story → ticket branch → implementation → automated checks → independent review → commit/PR. That is the developer workflow, not an Olarize HR feature. See [understanding the workflow](understanding-the-workflow.md) and [development workflow rules](../.instructions/development-workflow.md).
+
+## Swagger examples for the local demo
+
+Swagger examples now use Demo Morocco SARL (`c0000000-0000-4000-8000-000000000001`), its demo administrator (user ID ending `0011`) and ordinary member (user ID ending `0021`). These match the existing persistent local SQL seed; examples do not insert or reset records.
+
+Sign in as `olarize-demo-admin`, list the company memberships, then copy the chosen row's `userId` into the preview request. `GET /api/v1/identity` returns `currentUserId` for the signed-in person; it is only needed to check who is signed in. The demo preview changes the ordinary member from `EMPLOYEE` to `MANAGER`. Copy the returned `previewToken` and `targetVersion` into the confirmation request and use a new UUID as the idempotency key. Reuse that UUID only for an identical retry. The documented token placeholder cannot be executed. Confirmation updates the existing membership and appends an audit record. A second attempt needs current data and a different requested role if the member is already a manager. Response examples describe the initial seed and the first successful change; use actual responses for current state.
