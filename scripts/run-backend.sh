@@ -11,8 +11,11 @@ set +a
 : "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}"
 export SPRING_PROFILES_ACTIVE=local
 export DB_URL="jdbc:postgresql://localhost:${POSTGRES_PORT:-5433}/${POSTGRES_DB:-olarize}"
-export DB_USERNAME="${POSTGRES_USER:-olarize}"
-export DB_PASSWORD="$POSTGRES_PASSWORD"
+export DB_USERNAME=olarize_runtime
+export DB_PASSWORD="${LOCAL_RUNTIME_PASSWORD:-$POSTGRES_PASSWORD}"
+export FLYWAY_URL="$DB_URL"
+export FLYWAY_USER="${POSTGRES_USER:-olarize}"
+export FLYWAY_PASSWORD="$POSTGRES_PASSWORD"
 export SERVER_PORT="${BACKEND_PORT:-8080}"
 cd "$ROOT_DIR/backend"
 if [ "${1:-}" = "--debug" ]; then

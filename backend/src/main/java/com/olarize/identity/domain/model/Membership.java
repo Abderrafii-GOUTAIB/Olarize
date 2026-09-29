@@ -6,7 +6,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-public record Membership(UUID id, UUID companyId, Set<String> permissions, String status, long version) {
+public record Membership(UUID id, UUID companyId, Set<String> permissions, String status, long version,
+                         MembershipRoleBundle roleBundle, String subject) {
+    public Membership(UUID id, UUID companyId, Set<String> permissions, String status, long version) {
+        this(id, companyId, permissions, status, version, null, null);
+    }
     public Membership { permissions = Set.copyOf(permissions); }
     public boolean active() { return "ACTIVE".equals(status); }
 

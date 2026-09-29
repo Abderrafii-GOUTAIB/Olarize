@@ -2,16 +2,22 @@
 spring:
   config:
     activate:
-      on-profile: "local & !dev & !prod"
+      on-profile: "local & !dev & !prod & !migrate"
     import:
       - "optional:file:../.env[.properties]"
       - "optional:file:./.env[.properties]"
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:${POSTGRES_PORT:5433}/${POSTGRES_DB:olarize}}
-    username: ${DB_USERNAME:${POSTGRES_USER:olarize}}
-    password: ${DB_PASSWORD:${POSTGRES_PASSWORD}}
+    username: ${DB_USERNAME:olarize_runtime}
+    password: ${DB_PASSWORD:${LOCAL_RUNTIME_PASSWORD:${POSTGRES_PASSWORD}}}
   flyway:
     enabled: true
+    url: ${FLYWAY_URL:${DB_URL:jdbc:postgresql://localhost:${POSTGRES_PORT:5433}/${POSTGRES_DB:olarize}}}
+    user: ${FLYWAY_USER:${POSTGRES_USER:olarize}}
+    password: ${FLYWAY_PASSWORD:${POSTGRES_PASSWORD}}
+    locations: classpath:db/migration,classpath:db/local
+    placeholders:
+      local_runtime_password: ${LOCAL_RUNTIME_PASSWORD:${DB_PASSWORD:${POSTGRES_PASSWORD}}}
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:${BACKEND_PORT:8080}}

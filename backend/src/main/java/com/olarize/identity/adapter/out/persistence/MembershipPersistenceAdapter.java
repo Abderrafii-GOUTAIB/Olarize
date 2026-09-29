@@ -21,9 +21,11 @@ public class MembershipPersistenceAdapter implements MembershipReaderPort {
         if (subject == null || subject.isBlank()) return List.of();
         database.queryForObject("select set_config('olarize.subject', ?, true)", String.class, subject);
         return database.query("""
-                select id, company_id, permissions, status, version from public.identity_membership
+                select id, company_id, permissions, status, version, role_bundle, subject from public.identity_membership
                 where subject = ? and status = 'ACTIVE' order by company_id
                 """, (row, index) -> new Membership(row.getObject(1, UUID.class), row.getObject(2, UUID.class),
-                    Set.of((String[]) row.getArray(3).getArray()), row.getString(4), row.getLong(5)), subject);
+                    Set.of((String[]) row.getArray(3).getArray()), row.getString(4), row.getLong(5),
+                    row.getString(6) == null ? null : com.olarize.identity.domain.model.MembershipRoleBundle.valueOf(row.getString(6)),
+                    row.getString(7)), subject);
     }
 }

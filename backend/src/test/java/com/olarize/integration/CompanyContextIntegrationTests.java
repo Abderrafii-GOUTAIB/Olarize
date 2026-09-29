@@ -21,6 +21,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,23 +45,42 @@ class CompanyContextIntegrationTests {
     static final RSAKey SIGNING_KEY;
     static final RSAKey UNTRUSTED_KEY;
     static final HttpServer KEYS;
+    static final HttpServer KEYCLOAK_ADMIN;
+    static final java.util.concurrent.atomic.AtomicBoolean IDENTITY_PROVIDER_UNAVAILABLE = new java.util.concurrent.atomic.AtomicBoolean();
     static final String ISSUER = "https://identity.example.test/realms/olarize";
     static {
         try {
             SIGNING_KEY = new RSAKeyGenerator(2048).keyID("test-key").generate();
             UNTRUSTED_KEY = new RSAKeyGenerator(2048).keyID("test-key").generate();
             KEYS = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            byte[] body = new JWKSet(SIGNING_KEY.toPublicJWK()).toString().getBytes(StandardCharsets.UTF_8);
+            byte[] jwksBody = new JWKSet(SIGNING_KEY.toPublicJWK()).toString().getBytes(StandardCharsets.UTF_8);
             KEYS.createContext("/certs", exchange -> {
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, body.length);
-                try (var output = exchange.getResponseBody()) { output.write(body); }
+                exchange.sendResponseHeaders(200, jwksBody.length);
+                try (var output = exchange.getResponseBody()) { output.write(jwksBody); }
             });
             KEYS.start();
+            KEYCLOAK_ADMIN = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            KEYCLOAK_ADMIN.createContext("/token", exchange -> {
+                byte[] body = (IDENTITY_PROVIDER_UNAVAILABLE.get() ? "{}" : "{\"access_token\":\"synthetic-token\"}")
+                        .getBytes(StandardCharsets.UTF_8);
+                int status = IDENTITY_PROVIDER_UNAVAILABLE.get() ? 503 : 200;
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(status, body.length);
+                try (var output = exchange.getResponseBody()) { output.write(body); }
+            });
+            KEYCLOAK_ADMIN.createContext("/admin/realms/olarize/users/", exchange -> {
+                int status = exchange.getRequestURI().getPath().endsWith("/not-found") ? 404 : 200;
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(status, status == 404 ? -1 : body.length);
+                if (status != 404) try (var output = exchange.getResponseBody()) { output.write(body); }
+                else exchange.close();
+            });
+            KEYCLOAK_ADMIN.start();
         } catch (Exception exception) { throw new ExceptionInInitializerError(exception); }
     }
 
-    @AfterAll static void stopKeyServer() { KEYS.stop(0); }
+    @AfterAll static void stopKeyServer() { KEYS.stop(0); KEYCLOAK_ADMIN.stop(0); }
 
     @Container
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
@@ -74,6 +95,11 @@ class CompanyContextIntegrationTests {
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", () -> "membership_runtime");
         properties.add("spring.datasource.password", () -> "synthetic-only");
+        properties.add("olarize.identity-provider.admin-base-url", () -> "http://127.0.0.1:" + KEYCLOAK_ADMIN.getAddress().getPort());
+        properties.add("olarize.identity-provider.token-uri", () -> "http://127.0.0.1:" + KEYCLOAK_ADMIN.getAddress().getPort() + "/token");
+        properties.add("olarize.identity-provider.client-id", () -> "synthetic-client");
+        properties.add("olarize.identity-provider.client-secret", () -> "synthetic-secret");
+        properties.add("olarize.identity.preview-secret", () -> "synthetic-preview-signing-key-32-bytes-minimum");
     }
 
 
@@ -93,8 +119,10 @@ class CompanyContextIntegrationTests {
         owner.execute("create role membership_operator login password 'synthetic-only' nosuperuser nobypassrls nocreatedb nocreaterole");
         owner.execute("create role membership_runtime login password 'synthetic-only' nosuperuser nobypassrls nocreatedb nocreaterole");
         owner.execute("create role membership_migrator nologin nosuperuser nobypassrls");
+        owner.execute("create role olarize_identity_provisioner_owner nologin nosuperuser nobypassrls");
         owner.execute("grant olarize_identity_provisioner to membership_operator");
         owner.execute("grant usage on schema public to membership_runtime, membership_operator, membership_migrator");
+        owner.execute("grant usage on schema public to olarize_identity_provisioner_owner");
         owner.execute("grant create on schema public to membership_migrator");
         owner.execute("grant select on organization_company to membership_runtime, membership_migrator");
         owner.execute("alter table identity_membership owner to membership_migrator");
@@ -102,6 +130,16 @@ class CompanyContextIntegrationTests {
         owner.execute("alter function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) owner to membership_migrator");
         owner.execute("grant select on identity_membership to membership_runtime");
         owner.execute("grant execute on function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
+        owner.execute("grant select on organization_company to olarize_identity_provisioner_owner");
+        owner.execute("grant select, insert, update on identity_membership to olarize_identity_provisioner_owner");
+        owner.execute("grant select, insert on identity_membership_change_audit to olarize_identity_provisioner_owner");
+        owner.execute("alter table identity_membership_change_audit owner to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.list_company_identity_memberships(text,uuid) owner to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.change_company_membership(text,uuid,text,text,text,bigint,bigint,text,uuid,text) owner to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.find_company_membership_change_retry(text,uuid,text,text,text,bigint,bigint,text,uuid) owner to olarize_identity_provisioner_owner");
+        owner.execute("grant execute on function public.list_company_identity_memberships(text,uuid) to membership_runtime");
+        owner.execute("grant execute on function public.change_company_membership(text,uuid,text,text,text,bigint,bigint,text,uuid,text) to membership_runtime");
+        owner.execute("grant execute on function public.find_company_membership_change_retry(text,uuid,text,text,text,bigint,bigint,text,uuid) to membership_runtime");
     }
     java.util.UUID company() {
         var id = java.util.UUID.randomUUID();
@@ -138,6 +176,13 @@ class CompanyContextIntegrationTests {
         return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Authorization", "Bearer " + token).header("X-Request-ID", "auth-test")
                 .GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    HttpResponse<String> authenticatedPost(String path, String token, String body) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", "Bearer " + token).header("X-Request-ID", "membership-admin-test")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
 
@@ -177,6 +222,273 @@ class CompanyContextIntegrationTests {
         var denied = authenticatedGet("/api/v1/identity/company-context?companyId=" + company, token(subject()));
         assertThat(denied.statusCode()).isEqualTo(403);
         assertThat(denied.body()).contains("HTTP_403", "requestId").doesNotContain(company.toString());
+    }
+
+    @Test void identityAdministratorCanPreviewGrantConfirmAndRetryWithAtomicAudit() throws Exception {
+        IDENTITY_PROVIDER_UNAVAILABLE.set(false);
+        String actor = subject(); String target = subject(); var company = company();
+        membership(actor, company, "ACTIVE", "identity.admin");
+        String actorToken = token(actor);
+        String base = "/api/v1/companies/" + company;
+        String previewBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "targetSubject", target, "roleBundle", "HR_ADMIN", "reason", "Synthetic onboarding"));
+
+        var previewResponse = authenticatedPost(base + "/membership-change-previews", actorToken, previewBody);
+        assertThat(previewResponse.statusCode()).isEqualTo(201);
+        assertThat(previewResponse.body()).contains(target, "HR_ADMIN", "employee.read", "contract.write")
+                .doesNotContain("payroll.read", "payroll.roster.read");
+        assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject=?", Integer.class, company, target)).isZero();
+
+        var preview = json(previewResponse.body());
+        String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "previewToken", preview.get("previewToken").stringValue(), "expectedTargetVersion", 0,
+                "idempotencyKey", java.util.UUID.randomUUID().toString(), "confirm", true));
+        var first = authenticatedPost(base + "/membership-changes/confirm", actorToken, confirmation);
+        assertThat(first.statusCode()).isEqualTo(200);
+        assertThat(first.body()).contains(target, "ACTIVE", "HR_ADMIN", "employee.read", "contract.write")
+                .doesNotContain("payroll.read");
+        String id = json(first.body()).get("membershipId").stringValue();
+        var audit = owner.queryForMap("select * from identity_membership_change_audit where membership_id=?", java.util.UUID.fromString(id));
+        assertThat(audit).containsEntry("actor_subject", actor).containsEntry("action", "GRANT")
+                .containsEntry("previous_status", null).containsEntry("next_status", "ACTIVE")
+                .containsEntry("result_version", 1L).containsEntry("reason", "Synthetic onboarding");
+        assertThat((String[]) ((java.sql.Array) audit.get("next_permissions")).getArray()).contains("employee.read", "contract.write")
+                .doesNotContain("payroll.read", "identity.admin");
+
+        IDENTITY_PROVIDER_UNAVAILABLE.set(true);
+        HttpResponse<String> retry;
+        try { retry = authenticatedPost(base + "/membership-changes/confirm", actorToken, confirmation); }
+        finally { IDENTITY_PROVIDER_UNAVAILABLE.set(false); }
+        assertThat(retry.statusCode()).isEqualTo(200);
+        assertThat(json(retry.body()).get("membershipId").stringValue()).isEqualTo(id);
+        assertThat(owner.queryForObject("select count(*) from identity_membership_change_audit where membership_id=?", Integer.class,
+                java.util.UUID.fromString(id))).isEqualTo(1);
+        assertThat(authenticatedGet("/api/v1/identity/company-context", token(target)).body()).contains("employee.read", "contract.write");
+
+        String otherTarget = subject();
+        var otherPreview = authenticatedPost(base + "/membership-change-previews", actorToken,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", otherTarget,
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic conflicting retry")));
+        var otherClaims = json(otherPreview.body());
+        String conflicting = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "previewToken", otherClaims.get("previewToken").stringValue(), "expectedTargetVersion", 0,
+                "idempotencyKey", json(confirmation).get("idempotencyKey").stringValue(), "confirm", true));
+        assertThat(authenticatedPost(base + "/membership-changes/confirm", actorToken, conflicting).statusCode()).isEqualTo(409);
+        assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject=?",
+                Integer.class, company, otherTarget)).isZero();
+    }
+
+    @Test void membershipAdministrationIsCompanyScopedAndRejectsSelfOrProtectedTargets() throws Exception {
+        String actor = subject(); String ordinary = subject(); String foreignAdmin = subject();
+        var companyA = company(); var companyB = company();
+        membership(actor, companyA, "ACTIVE", "identity.admin");
+        membership(ordinary, companyA, "ACTIVE", "employee.self.read");
+        membership(foreignAdmin, companyB, "ACTIVE", "identity.admin");
+        String token = token(actor); String base = "/api/v1/companies/" + companyA;
+        var listed = authenticatedGet(base + "/memberships", token);
+        assertThat(listed.statusCode()).isEqualTo(200);
+        assertThat(listed.body()).contains(actor, ordinary).doesNotContain(foreignAdmin, companyB.toString());
+        assertThat(authenticatedGet("/api/v1/companies/" + companyB + "/memberships", token).statusCode()).isEqualTo(403);
+
+        var ordinaryActor = authenticatedPost(base + "/membership-change-previews", token(ordinary),
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", subject(),
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic reason")));
+        assertThat(ordinaryActor.statusCode()).isEqualTo(403);
+        var selfEdit = authenticatedPost(base + "/membership-change-previews", token,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", actor,
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic reason")));
+        assertThat(selfEdit.statusCode()).isEqualTo(409);
+        var foreignReference = authenticatedPost(base + "/membership-change-previews", token,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", foreignAdmin,
+                        "reason", "Synthetic revoke")));
+        assertThat(foreignReference.statusCode()).isEqualTo(409);
+        assertThat(foreignReference.body()).doesNotContain(foreignAdmin, companyB.toString());
+
+        var protectedAdmin = subject(); membership(protectedAdmin, companyA, "ACTIVE", "identity.admin");
+        var editAdmin = authenticatedPost(base + "/membership-change-previews", token,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", protectedAdmin,
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic reason")));
+        assertThat(editAdmin.statusCode()).isEqualTo(409);
+        assertThat(owner.queryForObject("select count(*) from identity_membership_change_audit where company_id=?", Integer.class, companyA)).isZero();
+    }
+
+    @Test void roleChangeAppliesReducedPermissionsOnTheTargetsNextRequest() throws Exception {
+        String actor = subject(); String target = subject(); var company = company();
+        membership(actor, company, "ACTIVE", "identity.admin");
+        var targetMembership = membership(target, company, "ACTIVE", "employee.self.read");
+        owner.update("update identity_membership set role_bundle='EMPLOYEE' where id=?", targetMembership);
+        String targetToken = token(target); String actorToken = token(actor);
+        String context = "/api/v1/identity/company-context?companyId=" + company;
+        assertThat(authenticatedGet(context, targetToken).body()).contains("employee.self.read");
+
+        String base = "/api/v1/companies/" + company;
+        var preview = authenticatedPost(base + "/membership-change-previews", actorToken,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                        "roleBundle", "MANAGER", "reason", "Synthetic role change")));
+        assertThat(preview.statusCode()).isEqualTo(201);
+        assertThat(preview.body()).contains("UPDATE", "employee.direct-reports.read").doesNotContain("employee.self.read");
+        String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "previewToken", json(preview.body()).get("previewToken").stringValue(), "expectedTargetVersion", 1,
+                "idempotencyKey", UUID.randomUUID().toString(), "confirm", true));
+        var changed = authenticatedPost(base + "/membership-changes/confirm", actorToken, confirmation);
+        assertThat(changed.statusCode()).isEqualTo(200);
+        assertThat(changed.body()).contains("MANAGER", "employee.direct-reports.read").doesNotContain("employee.self.read");
+        assertThat(authenticatedGet(context, targetToken).body()).contains("employee.direct-reports.read")
+                .doesNotContain("employee.self.read");
+
+        var audit = owner.queryForMap("select * from identity_membership_change_audit where membership_id=?", targetMembership);
+        assertThat(audit).containsEntry("action", "UPDATE").containsEntry("previous_role_bundle", "EMPLOYEE")
+                .containsEntry("next_role_bundle", "MANAGER").containsEntry("previous_status", "ACTIVE")
+                .containsEntry("next_status", "ACTIVE").containsEntry("expected_target_version", 1L)
+                .containsEntry("result_version", 2L);
+        assertThat((String[]) ((java.sql.Array) audit.get("previous_permissions")).getArray()).contains("employee.self.read");
+        assertThat((String[]) ((java.sql.Array) audit.get("next_permissions")).getArray())
+                .contains("employee.direct-reports.read").doesNotContain("employee.self.read");
+    }
+
+    @Test void reactivationRequiresVerifiedSubjectAndRecordsBeforeAfterAudit() throws Exception {
+        String actor = subject(); String target = subject(); var company = company();
+        membership(actor, company, "ACTIVE", "identity.admin");
+        var targetMembership = membership(target, company, "REVOKED", "employee.self.read");
+        owner.update("update identity_membership set role_bundle='EMPLOYEE' where id=?", targetMembership);
+        String actorToken = token(actor); String targetToken = token(target);
+        String base = "/api/v1/companies/" + company;
+        String context = "/api/v1/identity/company-context?companyId=" + company;
+        assertThat(authenticatedGet(context, targetToken).statusCode()).isEqualTo(403);
+
+        String previewBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                "roleBundle", "MANAGER", "reason", "Synthetic reactivation"));
+        IDENTITY_PROVIDER_UNAVAILABLE.set(true);
+        HttpResponse<String> unavailable;
+        try { unavailable = authenticatedPost(base + "/membership-change-previews", actorToken, previewBody); }
+        finally { IDENTITY_PROVIDER_UNAVAILABLE.set(false); }
+        assertThat(unavailable.statusCode()).isEqualTo(503);
+        assertThat(owner.queryForObject("select status from identity_membership where id=?", String.class, targetMembership)).isEqualTo("REVOKED");
+        assertThat(owner.queryForObject("select count(*) from identity_membership_change_audit where membership_id=?", Integer.class, targetMembership)).isZero();
+
+        var preview = authenticatedPost(base + "/membership-change-previews", actorToken, previewBody);
+        assertThat(preview.statusCode()).isEqualTo(201);
+        assertThat(preview.body()).contains("REACTIVATE", "employee.direct-reports.read");
+        String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "previewToken", json(preview.body()).get("previewToken").stringValue(), "expectedTargetVersion", 1,
+                "idempotencyKey", UUID.randomUUID().toString(), "confirm", true));
+        var reactivated = authenticatedPost(base + "/membership-changes/confirm", actorToken, confirmation);
+        assertThat(reactivated.statusCode()).isEqualTo(200);
+        assertThat(reactivated.body()).contains("ACTIVE", "MANAGER", "employee.direct-reports.read")
+                .doesNotContain("employee.self.read");
+        assertThat(authenticatedGet(context, targetToken).body()).contains("employee.direct-reports.read")
+                .doesNotContain("employee.self.read");
+
+        var audit = owner.queryForMap("select * from identity_membership_change_audit where membership_id=?", targetMembership);
+        assertThat(audit).containsEntry("action", "REACTIVATE").containsEntry("previous_role_bundle", "EMPLOYEE")
+                .containsEntry("next_role_bundle", "MANAGER").containsEntry("previous_status", "REVOKED")
+                .containsEntry("next_status", "ACTIVE").containsEntry("expected_target_version", 1L)
+                .containsEntry("result_version", 2L);
+        assertThat((String[]) ((java.sql.Array) audit.get("previous_permissions")).getArray()).contains("employee.self.read");
+        assertThat((String[]) ((java.sql.Array) audit.get("next_permissions")).getArray())
+                .contains("employee.direct-reports.read").doesNotContain("employee.self.read");
+    }
+
+    @Test void providerOutageBlocksGrantButDoesNotBlockRevocation() throws Exception {
+        String actor = subject(); String existing = subject(); String newTarget = subject(); var company = company();
+        membership(actor, company, "ACTIVE", "identity.admin");
+        var existingId = membership(existing, company, "ACTIVE", "employee.self.read");
+        String token = token(actor); String base = "/api/v1/companies/" + company;
+        IDENTITY_PROVIDER_UNAVAILABLE.set(true);
+        try {
+            var grant = authenticatedPost(base + "/membership-change-previews", token,
+                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", newTarget,
+                            "roleBundle", "EMPLOYEE", "reason", "Synthetic grant")));
+            assertThat(grant.statusCode()).isEqualTo(503);
+            var revokePreview = authenticatedPost(base + "/membership-change-previews", token,
+                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", existing,
+                            "reason", "Synthetic revocation")));
+            assertThat(revokePreview.statusCode()).isEqualTo(201);
+            var preview = json(revokePreview.body());
+            String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                    "previewToken", preview.get("previewToken").stringValue(), "expectedTargetVersion", 1,
+                    "idempotencyKey", UUID.randomUUID().toString(), "confirm", true));
+            var revoked = authenticatedPost(base + "/membership-changes/confirm", token, confirmation);
+            assertThat(revoked.statusCode()).isEqualTo(200);
+            assertThat(revoked.body()).contains("REVOKED");
+            assertThat(authenticatedGet("/api/v1/identity/company-context?companyId=" + company, token(existing)).statusCode()).isEqualTo(403);
+            assertThat(owner.queryForObject("select status from identity_membership where id=?", String.class, existingId)).isEqualTo("REVOKED");
+        } finally {
+            IDENTITY_PROVIDER_UNAVAILABLE.set(false);
+        }
+        var missingSubject = authenticatedPost(base + "/membership-change-previews", token,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", "not-found",
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic missing subject")));
+        assertThat(missingSubject.statusCode()).isEqualTo(409);
+        assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject='not-found'",
+                Integer.class, company)).isZero();
+    }
+
+    @Test void concurrentGrantsForTheSameSubjectCreateOneMembershipAndAudit() throws Exception {
+        IDENTITY_PROVIDER_UNAVAILABLE.set(false);
+        String actor = subject(); String target = subject(); var company = company();
+        String token = token(actor); String base = "/api/v1/companies/" + company;
+        membership(actor, company, "ACTIVE", "identity.admin");
+        var firstPreview = authenticatedPost(base + "/membership-change-previews", token,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic concurrent grant")));
+        var secondPreview = authenticatedPost(base + "/membership-change-previews", token,
+                new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                        "roleBundle", "EMPLOYEE", "reason", "Synthetic concurrent grant")));
+        String firstBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "previewToken", json(firstPreview.body()).get("previewToken").stringValue(), "expectedTargetVersion", 0,
+                "idempotencyKey", UUID.randomUUID().toString(), "confirm", true));
+        String secondBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                "previewToken", json(secondPreview.body()).get("previewToken").stringValue(), "expectedTargetVersion", 0,
+                "idempotencyKey", UUID.randomUUID().toString(), "confirm", true));
+        var firstRequest = HttpRequest.newBuilder(URI.create("http://localhost:" + port + base + "/membership-changes/confirm"))
+                .header("Authorization", "Bearer " + token).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(firstBody)).build();
+        var secondRequest = HttpRequest.newBuilder(URI.create("http://localhost:" + port + base + "/membership-changes/confirm"))
+                .header("Authorization", "Bearer " + token).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(secondBody)).build();
+        var first = client.sendAsync(firstRequest, HttpResponse.BodyHandlers.ofString());
+        var second = client.sendAsync(secondRequest, HttpResponse.BodyHandlers.ofString());
+        var responses = List.of(first.join(), second.join());
+        assertThat(responses).extracting(HttpResponse::statusCode).containsExactlyInAnyOrder(200, 409);
+        assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject=? and status='ACTIVE'",
+                Integer.class, company, target)).isEqualTo(1);
+        assertThat(owner.queryForObject("select count(*) from identity_membership_change_audit where company_id=? and subject=?",
+                Integer.class, company, target)).isEqualTo(1);
+    }
+
+    @Test void auditFailureRollsBackMembershipMutation() throws Exception {
+        String actor = subject(); String target = "synthetic-audit-failure"; var company = company();
+        membership(actor, company, "ACTIVE", "identity.admin");
+        owner.execute("""
+                CREATE OR REPLACE FUNCTION public.fail_synthetic_membership_audit() RETURNS trigger
+                LANGUAGE plpgsql AS $$ BEGIN
+                    IF NEW.subject = 'synthetic-audit-failure' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF;
+                    RETURN NEW;
+                END $$
+                """);
+        owner.execute("CREATE TRIGGER fail_synthetic_membership_audit BEFORE INSERT ON identity_membership_change_audit " +
+                "FOR EACH ROW EXECUTE FUNCTION public.fail_synthetic_membership_audit()");
+        try {
+            String base = "/api/v1/companies/" + company; String token = token(actor);
+            var previewResponse = authenticatedPost(base + "/membership-change-previews", token,
+                    new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("targetSubject", target,
+                            "roleBundle", "EMPLOYEE", "reason", "Synthetic audit rollback")));
+            var claims = json(previewResponse.body());
+            String confirmation = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of(
+                    "previewToken", claims.get("previewToken").stringValue(), "expectedTargetVersion", 0,
+                    "idempotencyKey", UUID.randomUUID().toString(), "confirm", true));
+            var failed = authenticatedPost(base + "/membership-changes/confirm", token, confirmation);
+            assertThat(failed.statusCode()).isEqualTo(500);
+            assertThat(failed.body()).contains("HTTP_500", "requestId").doesNotContain("synthetic audit failure", target);
+            assertThat(owner.queryForObject("select count(*) from identity_membership where company_id=? and subject=?",
+                    Integer.class, company, target)).isZero();
+            assertThat(owner.queryForObject("select count(*) from identity_membership_change_audit where company_id=? and subject=?",
+                    Integer.class, company, target)).isZero();
+        } finally {
+            owner.execute("DROP TRIGGER fail_synthetic_membership_audit ON identity_membership_change_audit");
+            owner.execute("DROP FUNCTION public.fail_synthetic_membership_audit()");
+        }
     }
     @Test void unauthenticatedAndUnscopedTokensCannotReadMemberships() throws Exception {
         for (String path : new String[]{"/api/v1/identity/memberships", "/api/v1/identity/company-context"}) {

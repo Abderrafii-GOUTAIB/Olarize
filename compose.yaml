@@ -67,8 +67,12 @@ services:
       AUTH_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/olarize
       AUTH_JWK_SET_URI: http://keycloak:8080/realms/olarize/protocol/openid-connect/certs
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-olarize}
-      DB_USERNAME: ${POSTGRES_USER:-olarize}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      DB_USERNAME: olarize_runtime
+      DB_PASSWORD: ${LOCAL_RUNTIME_PASSWORD:-${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}
+      FLYWAY_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-olarize}
+      FLYWAY_USER: ${POSTGRES_USER:-olarize}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      LOCAL_RUNTIME_PASSWORD: ${LOCAL_RUNTIME_PASSWORD:-${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}
     depends_on:
       db:
         condition: service_healthy
