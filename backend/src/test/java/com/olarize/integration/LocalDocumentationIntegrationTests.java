@@ -30,9 +30,14 @@ class LocalDocumentationIntegrationTests {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) {
+        // The local profile configures Flyway separately from the application datasource.
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", POSTGRES::getUsername);
         properties.add("spring.datasource.password", POSTGRES::getPassword);
+        properties.add("spring.flyway.url", POSTGRES::getJdbcUrl);
+        properties.add("spring.flyway.user", POSTGRES::getUsername);
+        properties.add("spring.flyway.password", POSTGRES::getPassword);
+        properties.add("spring.flyway.placeholders.local_runtime_password", () -> "synthetic-local-runtime-only");
     }
 
     @LocalServerPort int port;

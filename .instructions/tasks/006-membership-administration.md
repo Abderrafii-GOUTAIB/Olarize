@@ -36,6 +36,8 @@ Run focused domain and integration tests, then `./scripts/verify-backend.sh`. Ad
 
 **2026-09-29 CI startup fix:** Removed the obsolete `MembershipAdministrationPersistenceAdapter` left alongside `MembershipAdministrationJdbcRepository`. Both implemented `MembershipAdministrationPort`, so Spring could not start. A clean `./scripts/verify-backend.sh` run passed 76 tests with no failures, errors or skips and packaged the backend jar.
 
+**2026-09-29 local Swagger CI fix:** The local-profile documentation test now points both the application datasource and Flyway at its Testcontainers PostgreSQL instance. Previously Flyway used the local-profile default `localhost:5433`, which is unavailable in CI. The focused documentation tests passed (2 tests), then the full clean `./scripts/verify-backend.sh` passed 76 tests with no failures, errors or skips and packaged the jar.
+
 ## Completion notes
 
 Production identity-administrator grant authority remains blocked by OD-03. Tests use synthetic subjects and provider fixtures. Jira metadata is recorded in `.github/jira/OLARIZE-19.json` for the approved PR workflow.
