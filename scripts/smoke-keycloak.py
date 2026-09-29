@@ -135,7 +135,7 @@ def check_endpoint(api_url, tokens, subject):
     )
     with urllib.request.urlopen(access_request, timeout=TIMEOUT_SECONDS) as response:
         assert response.status == 200
-        assert json.load(response) == {"subject": subject}
+        assert json.load(response) == {"currentUserId": subject}
     print("PASS: real Keycloak authorization-code + PKCE login and /api/v1/identity")
 
     id_request = urllib.request.Request(

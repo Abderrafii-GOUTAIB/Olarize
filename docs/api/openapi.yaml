@@ -6,21 +6,21 @@ paths:
   /api/v1/identity:
     get:
       operationId: getCurrentIdentity
-      summary: Return the authenticated external subject
-      description: Returns the subject (sub) from the validated Keycloak access token. This is the identity-provider ID, not an employee ID, and it does not grant access to company or HR data. Requires the profile.read scope.
+      summary: Return the current user ID
+      description: Returns currentUserId from the validated Keycloak access token. This identifies the signed-in person and does not grant access to company or HR data. Requires the profile.read scope.
       security:
         - keycloak: [profile.read]
       responses:
         '200':
-          description: The authenticated subject identifier from the access token.
+          description: The signed-in person's Keycloak user ID from the access token.
           content:
             application/json:
               schema:
                 type: object
-                required: [subject]
+                required: [currentUserId]
                 additionalProperties: false
                 properties:
-                  subject: {type: string, minLength: 1}
+                  currentUserId: {type: string, minLength: 1, description: Keycloak user ID of the person currently signed in., example: c0000000-0000-4000-8000-000000000011}
         '401':
           description: Missing or invalid access token; includes WWW-Authenticate Bearer
           content:
@@ -73,7 +73,7 @@ paths:
           in: query
           required: false
           description: Optional company UUID from your active memberships. Omit it when you have one active membership; provide it when you have more than one.
-          schema: {type: string, format: uuid}
+          schema: {type: string, format: uuid, example: c0000000-0000-4000-8000-000000000001}
       responses:
         '200':
           description: The selected company and the signed-in user's active membership permissions.
@@ -99,7 +99,7 @@ paths:
     get:
       operationId: listCompanyMemberships
       summary: List memberships for a company
-      description: Lists membership subjects, current status, fixed role bundle, explicit permissions and version. Requires profile.read plus an active identity.admin membership in the selected company. The company ID selects scope; it does not grant access. Identity administrators are visible but cannot be changed through this API.
+      description: Lists member user IDs, current status, fixed role bundle, explicit permissions and version. Requires profile.read plus an active identity.admin membership in the selected company. The company ID selects scope; it does not grant access. Identity administrators are visible but cannot be changed through this API.
       security:
         - keycloak: [profile.read]
       parameters:
@@ -126,7 +126,7 @@ paths:
     post:
       operationId: previewMembershipChange
       summary: Preview a company membership change
-      description: Previews an exact grant, role change, reactivation or revocation. Grants and reactivations verify the target Keycloak subject. The signed preview binds the actor, company, target, action, permissions, versions and reason; it expires after 30 minutes and does not change membership state. Only HR_ADMIN, MANAGER, EMPLOYEE and PAYROLL_OPERATOR bundles are assignable. identity.admin cannot be granted or edited.
+      description: Previews an exact grant, role change, reactivation or revocation. Copy userId from the membership row to choose the member. Grants and reactivations verify that Keycloak user ID. The signed preview binds the administrator, company, member, action, permissions, versions and reason; it expires after 30 minutes and does not change membership state. Only HR_ADMIN, MANAGER, EMPLOYEE and PAYROLL_OPERATOR bundles are assignable. identity.admin cannot be granted or edited.
       security:
         - keycloak: [profile.read]
       parameters:
@@ -182,6 +182,14 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ManagedMembership'}
+              example:
+                membershipId: c0000000-0000-4000-8000-000000000020
+                userId: c0000000-0000-4000-8000-000000000021
+                companyId: c0000000-0000-4000-8000-000000000001
+                status: ACTIVE
+                roleBundle: MANAGER
+                permissions: [employee.direct-reports.read]
+                version: 2
         '400':
           description: Confirmation body is malformed, contains unknown fields, or confirm is not true.
           content:
@@ -209,7 +217,7 @@ components:
       in: path
       required: true
       description: Company UUID from the signed-in user's active membership context. It selects a requested scope but does not grant access.
-      schema: {type: string, format: uuid}
+      schema: {type: string, format: uuid, example: c0000000-0000-4000-8000-000000000001}
   securitySchemes:
     keycloak:
       type: oauth2
@@ -222,6 +230,12 @@ components:
   schemas:
     CompanyContext:
       type: object
+      example:
+        membershipId: c0000000-0000-4000-8000-000000000010
+        companyId: c0000000-0000-4000-8000-000000000001
+        companyName: Demo Morocco SARL
+        permissions: [identity.admin]
+        version: 1
       required: [membershipId, companyId, companyName, permissions, version]
       additionalProperties: false
       properties:
@@ -235,11 +249,19 @@ components:
         version: {type: integer, format: int64, minimum: 1}
     ManagedMembership:
       type: object
-      required: [membershipId, subject, companyId, status, permissions, version]
+      example:
+        membershipId: c0000000-0000-4000-8000-000000000020
+        userId: c0000000-0000-4000-8000-000000000021
+        companyId: c0000000-0000-4000-8000-000000000001
+        status: ACTIVE
+        roleBundle: EMPLOYEE
+        permissions: [employee.self.read]
+        version: 1
+      required: [membershipId, userId, companyId, status, permissions, version]
       additionalProperties: false
       properties:
         membershipId: {type: string, format: uuid}
-        subject: {type: string, minLength: 1}
+        userId: {type: string, minLength: 1, description: Keycloak user ID of this member; copy it into a membership-change preview request.}
         companyId: {type: string, format: uuid}
         status: {type: string, enum: [ACTIVE, REVOKED]}
         roleBundle: {type: string, nullable: true, enum: [HR_ADMIN, MANAGER, EMPLOYEE, PAYROLL_OPERATOR]}
@@ -250,21 +272,37 @@ components:
         version: {type: integer, format: int64, minimum: 1}
     MembershipChangePreviewRequest:
       type: object
-      required: [targetSubject, reason]
+      example:
+        userId: c0000000-0000-4000-8000-000000000021
+        roleBundle: MANAGER
+        reason: Assign manager access to the demo member.
+      required: [userId, reason]
       additionalProperties: false
       properties:
-        targetSubject: {type: string, minLength: 1, maxLength: 255, description: Exact opaque Keycloak subject; never an email or username.}
+        userId: {type: string, minLength: 1, maxLength: 255, description: Copy the userId from the selected company membership row; this is a Keycloak user ID.}
         roleBundle: {type: string, nullable: true, enum: [HR_ADMIN, MANAGER, EMPLOYEE, PAYROLL_OPERATOR], description: Omit only to revoke an active ordinary membership.}
         reason: {type: string, minLength: 1, maxLength: 1000}
     MembershipChangePreview:
       type: object
-      required: [previewToken, previewId, companyId, targetSubject, action, permissions, actorVersion, targetVersion, expiresAt]
+      description: Illustrative response. Execute the preview to obtain a real token and expiry, valid for 30 minutes. Examples describe the initial seed; current versions may differ.
+      example:
+        previewToken: COPY_REAL_PREVIEW_TOKEN_FROM_PREVIEW_RESPONSE
+        previewId: c0000000-0000-4000-8000-000000000060
+        companyId: c0000000-0000-4000-8000-000000000001
+        userId: c0000000-0000-4000-8000-000000000021
+        action: UPDATE
+        roleBundle: MANAGER
+        permissions: [employee.direct-reports.read]
+        actorVersion: 1
+        targetVersion: 1
+        expiresAt: '2026-09-29T12:30:00Z'
+      required: [previewToken, previewId, companyId, userId, action, permissions, actorVersion, targetVersion, expiresAt]
       additionalProperties: false
       properties:
         previewToken: {type: string, description: Signed opaque token binding the exact proposed change.}
         previewId: {type: string, format: uuid}
         companyId: {type: string, format: uuid}
-        targetSubject: {type: string}
+        userId: {type: string}
         action: {type: string, enum: [GRANT, UPDATE, REACTIVATE, REVOKE]}
         roleBundle: {type: string, nullable: true, enum: [HR_ADMIN, MANAGER, EMPLOYEE, PAYROLL_OPERATOR]}
         permissions:
@@ -275,12 +313,18 @@ components:
         expiresAt: {type: string, format: date-time}
     ConfirmMembershipChangeRequest:
       type: object
+      description: Run the preview first. Copy its real previewToken and targetVersion. Generate a fresh UUID for each new change; reuse it only for an identical retry. The example token is an instruction, not a usable signed token.
+      example:
+        previewToken: COPY_REAL_PREVIEW_TOKEN_FROM_PREVIEW_RESPONSE
+        expectedTargetVersion: 1
+        idempotencyKey: 78204b94-fb77-472e-a39f-524fe2d8c879
+        confirm: true
       required: [previewToken, expectedTargetVersion, idempotencyKey, confirm]
       additionalProperties: false
       properties:
         previewToken: {type: string}
         expectedTargetVersion: {type: integer, format: int64, minimum: 0}
-        idempotencyKey: {type: string, format: uuid}
+        idempotencyKey: {type: string, format: uuid, description: New UUID for each change; reuse only when retrying this exact confirmation so it is applied once.}
         confirm: {type: boolean, enum: [true], description: Explicit confirmation of the exact preview.}
     Problem:
       type: object

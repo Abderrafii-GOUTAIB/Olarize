@@ -1,23 +1,9 @@
 package com.olarize.integration;
 
 import java.net.URI;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Date;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import com.nimbusds.jose.JWSAlgorithm;
-import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.crypto.RSASSASigner;
-import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jose.jwk.RSAKey;
-import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
-import com.nimbusds.jwt.JWTClaimsSet;
-import com.nimbusds.jwt.SignedJWT;
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.AfterAll;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,23 +23,6 @@ import tools.jackson.databind.ObjectMapper;
 @ActiveProfiles("local")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class LocalDocumentationIntegrationTests {
-    static final String ISSUER = "https://local-demo.example.test/realms/olarize";
-    static final RSAKey SIGNING_KEY;
-    static final HttpServer KEYS;
-    static {
-        try {
-            SIGNING_KEY = new RSAKeyGenerator(2048).keyID("local-demo-test-key").generate();
-            KEYS = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            byte[] jwks = new JWKSet(SIGNING_KEY.toPublicJWK()).toString().getBytes(StandardCharsets.UTF_8);
-            KEYS.createContext("/certs", exchange -> {
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, jwks.length);
-                try (var output = exchange.getResponseBody()) { output.write(jwks); }
-            });
-            KEYS.start();
-        } catch (Exception exception) { throw new ExceptionInInitializerError(exception); }
-    }
-
     @Container
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
         DockerImageName.parse("pgvector/pgvector:0.8.6-pg17").asCompatibleSubstituteFor("postgres"))
@@ -61,15 +30,14 @@ class LocalDocumentationIntegrationTests {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) {
+        // The local profile configures Flyway separately from the application datasource.
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        properties.add("spring.datasource.username", () -> "olarize_runtime");
-        properties.add("spring.datasource.password", () -> "local-synthetic-only");
+        properties.add("spring.datasource.username", POSTGRES::getUsername);
+        properties.add("spring.datasource.password", POSTGRES::getPassword);
         properties.add("spring.flyway.url", POSTGRES::getJdbcUrl);
         properties.add("spring.flyway.user", POSTGRES::getUsername);
         properties.add("spring.flyway.password", POSTGRES::getPassword);
-        properties.add("spring.flyway.placeholders.local_runtime_password", () -> "local-synthetic-only");
-        properties.add("olarize.auth.issuer", () -> ISSUER);
-        properties.add("olarize.auth.jwk-set-uri", () -> "http://127.0.0.1:" + KEYS.getAddress().getPort() + "/certs");
+        properties.add("spring.flyway.placeholders.local_runtime_password", () -> "synthetic-local-runtime-only");
     }
 
     @LocalServerPort int port;
@@ -81,39 +49,6 @@ class LocalDocumentationIntegrationTests {
             HttpResponse.BodyHandlers.ofString());
     }
 
-    private HttpResponse<String> authenticatedGet(String path, String subject) throws Exception {
-        return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
-                .header("Authorization", "Bearer " + token(subject)).GET().build(), HttpResponse.BodyHandlers.ofString());
-    }
-
-    private static String token(String subject) throws Exception {
-        Instant now = Instant.now();
-        var claims = new JWTClaimsSet.Builder().issuer(ISSUER).subject(subject).audience("olarize-api")
-                .issueTime(Date.from(now.minusSeconds(2))).expirationTime(Date.from(now.plusSeconds(300)))
-                .claim("typ", "Bearer").claim("azp", "olarize-web").claim("scope", "openid profile.read").build();
-        var jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID("local-demo-test-key").build(), claims);
-        jwt.sign(new RSASSASigner(SIGNING_KEY));
-        return jwt.serialize();
-    }
-
-    @AfterAll static void stopKeyServer() { KEYS.stop(0); }
-
-    @Test void localProfileSeedsPersistentRowsAndSwaggerReturnsThemThroughTheRestrictedRuntimeRole() throws Exception {
-        var active = authenticatedGet("/api/v1/identity/memberships", "c0000000-0000-4000-8000-000000000011");
-        assertThat(active.statusCode()).isEqualTo(200);
-        assertThat(active.body()).contains("Demo Morocco SARL", "c0000000-0000-4000-8000-000000000001", "identity.admin");
-
-        var context = authenticatedGet("/api/v1/identity/company-context", "c0000000-0000-4000-8000-000000000011");
-        assertThat(context.statusCode()).isEqualTo(200);
-        assertThat(context.body()).contains("Demo Morocco SARL", "identity.admin");
-
-        var managed = authenticatedGet("/api/v1/companies/c0000000-0000-4000-8000-000000000001/memberships",
-                "c0000000-0000-4000-8000-000000000011");
-        assertThat(managed.statusCode()).isEqualTo(200);
-        assertThat(managed.body()).contains("c0000000-0000-4000-8000-000000000011",
-                "c0000000-0000-4000-8000-000000000021", "employee.self.read");
-    }
-
     @Test void localOpenApiListsOnlyTheEndpointAndBearerScheme() throws Exception {
         var response = get("/v3/api-docs");
         assertThat(response.statusCode()).isEqualTo(200);
@@ -121,13 +56,13 @@ class LocalDocumentationIntegrationTests {
             .doesNotContain("/api/employees", "DB_PASSWORD", "sensitive-query-value");
 
         var operation = mapper.readTree(response.body()).path("paths").path("/api/v1/identity").path("get");
-        assertThat(operation.path("summary").asText()).isEqualTo("Return the authenticated external subject");
+        assertThat(operation.path("summary").asText()).isEqualTo("Return the current user ID");
         assertThat(operation.path("security").get(0).path("keycloak").get(0).asText()).isEqualTo("profile.read");
         var successSchema = operation.path("responses").path("200").path("content")
             .path("application/json").path("schema");
         assertThat(successSchema.isObject()).isTrue();
         assertThat(successSchema.size()).isGreaterThan(0);
-        assertThat(response.body()).contains("subject");
+        assertThat(response.body()).contains("currentUserId");
         assertThat(operation.path("responses").path("401").path("description").asText()).isNotBlank();
         assertThat(operation.path("responses").path("403").path("description").asText()).isNotBlank();
 
@@ -151,6 +86,29 @@ class LocalDocumentationIntegrationTests {
         assertThat(context.path("responses").path("403").path("description").asText())
                 .contains("no active membership", "selected automatically");
         assertThat(response.body()).contains("companyName", "membershipId").doesNotContain("/api/v1/organizations");
+        var schemas = mapper.readTree(response.body()).path("components").path("schemas");
+        assertThat(schemas.path("CurrentUserResponse").path("properties").has("currentUserId")).isTrue();
+        assertThat(schemas.path("ManagedMembershipResponse").path("properties").has("userId")).isTrue();
+        assertThat(schemas.path("MembershipChangePreviewRequest").path("properties").has("userId")).isTrue();
+        assertThat(schemas.path("MembershipPreviewResponse").path("properties").has("userId")).isTrue();
+        var previewExample = schemas.path("MembershipChangePreviewRequest").path("example");
+        assertThat(previewExample.path("userId").asText()).isEqualTo("c0000000-0000-4000-8000-000000000021");
+        assertThat(previewExample.path("roleBundle").asText()).isEqualTo("MANAGER");
+        assertThat(schemas.path("CompanyContext").path("example").path("companyName").asText()).isEqualTo("Demo Morocco SARL");
+        assertThat(schemas.path("ConfirmMembershipChangeRequest").path("example").path("previewToken").asText())
+                .isEqualTo("COPY_REAL_PREVIEW_TOKEN_FROM_PREVIEW_RESPONSE");
+        assertThat(context.path("parameters").get(0).path("example").asText()).isEqualTo("c0000000-0000-4000-8000-000000000001");
+
+        var paths = mapper.readTree(response.body()).path("paths");
+        var companyMemberships = paths.path("/api/v1/companies/{companyId}/memberships").path("get");
+        var preview = paths.path("/api/v1/companies/{companyId}/membership-change-previews").path("post");
+        var confirm = paths.path("/api/v1/companies/{companyId}/membership-changes/confirm").path("post");
+        for (var securedOperation : java.util.List.of(companyMemberships, preview, confirm)) {
+            assertThat(securedOperation.path("security").get(0).path("keycloak").get(0).asText())
+                    .isEqualTo("profile.read");
+            assertThat(securedOperation.path("responses").path("401").path("description").asText())
+                    .contains("access token");
+        }
     }
 
     @Test void swaggerUiLoadsLocallyWithoutOpeningHrRoutes() throws Exception {

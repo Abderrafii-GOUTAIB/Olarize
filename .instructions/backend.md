@@ -8,11 +8,16 @@ Use package-by-business-module under com.olarize: identity, organization, employ
 
 Expose deliberate public module APIs from `application/port/in` when another module needs them. Keep each business module under its module package, organized as `domain/{model,service,event,exception}`, `application/{port/in,port/out,service,command,query}`, and `adapter/{in/{web,messaging,cli},out/{persistence,messaging,external}}` as needed. Name application services with a `Service` suffix. Create only folders that contain real code; do not call another module's repository or import its implementation classes. Use identifiers and module ports rather than cross-module JPA object graphs. Keep shared types small; do not create a generic shared-service dumping ground. Add Spring Modulith verification for prohibited dependencies and cycles.
 
+For new business persistence and any persistence code being substantially changed, use Spring Data JPA as the default ORM: a `JpaEntity`, a `JpaRepository`, and an adapter implementing the focused application port where that boundary is needed. Do not add direct `JdbcTemplate` CRUD or duplicate implementations of one port. Use a native query or focused JDBC adapter only when a concrete PostgreSQL requirement (such as an atomic security-definer operation, row-level-security context, locking or bulk operation) cannot be expressed safely and clearly with JPA. Document that exception beside the operation and cover its transaction, authorization and mapping behavior with PostgreSQL integration tests. Existing JDBC code is current implementation, not the template for new features; migrate it in a scoped change rather than silently renaming it.
+
+Use searchable suffixes that match the technology: `JpaRepository` for Spring Data interfaces, `JpaEntity` for persistence entities, `JdbcRepository` for an approved JDBC adapter, `Mapper` for boundary mapping, `Request`/`Response` for web DTOs, `Service` for application services and `Controller` for HTTP adapters. Keep exactly one active Spring bean for each persistence port unless a qualified multi-implementation design is required and tested.
+
 Controllers validate transport input and call application services. Application services establish trusted context and transaction boundaries. Domain logic implements explicit rules. Infrastructure adapters handle persistence and providers. Prefer clear code over layers containing only pass-through methods.
 
 ## API and persistence
 
-- Use request/response DTOs, not JPA entities. Document contracts through OpenAPI when endpoints appear.
+- Use dedicated request/response DTOs for every HTTP API; never expose JPA entities or persistence-only fields. Keep controllers limited to validation, authorization entry and mapping. Put web DTO mapping in a named web `Mapper` and entity/domain mapping in a named persistence `Mapper` when that boundary has real conversion logic; do not mix SQL rows, domain models and HTTP responses in one class. Document contracts through OpenAPI when endpoints appear.
+- Model fixed business states and role values as module-owned enums. Put reusable, stateless operations in a small, clearly named `util` class only when at least two real callers need them; business decisions belong in domain models/services, not generic utilities.
 - Use UUID identifiers, explicit counting units and BigDecimal where fractional values or money are needed.
 - Use LocalDate for leave dates; store instants in UTC for events; use Africa/Casablanca for relevant calendar interpretation.
 - Enforce tenant predicates in database access. Verify ownership for every identifier supplied by a client.
@@ -37,6 +42,8 @@ Use JUnit and Spring tests, Testcontainers PostgreSQL for database-sensitive beh
 ## Clean architecture and errors
 
 Follow the package layout in docs/architecture.md. Group code by business module, then separate its public API, domain, application ports/services and adapters. Name application service classes with the `Service` suffix. Domain code has no Spring, HTTP, JPA or AI dependencies. Application services depend on domain and explicit ports; adapters implement persistence/provider ports. Controllers map inputs/outputs. Add abstractions only where they protect a real boundary; do not create unused event, mapper, repository or utility layers.
+
+Treat clean code as a review gate: use descriptive business names, one responsibility per class, short cohesive methods, explicit types, constructor injection and one-way module dependencies. Remove dead code, unused imports and duplicate beans. Do not add a generic base repository, catch-all service, speculative utility or design pattern for appearance. Use a pattern only when it solves a named variation or boundary, and explain that choice in the change. Reject new or substantially changed backend work that violates the JPA/DTO/mapping rules above without a documented, tested exception.
 
 Use the platform HTTP problem contract for controller and security failures. Domain failures map to HTTP only at the web adapter. Never expose exception messages, SQL, secrets or rejected values to clients. Keep request IDs through errors and clear logging context after each request. Shared platform infrastructure must not become a shared business-service layer. See docs/errors-and-debugging.md.
 

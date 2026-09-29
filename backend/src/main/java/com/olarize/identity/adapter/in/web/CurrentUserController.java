@@ -2,6 +2,7 @@ package com.olarize.identity.adapter.in.web;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,5 +14,6 @@ class CurrentUserController {
         return new CurrentUserResponse(principal.getSubject());
     }
 
-    record CurrentUserResponse(String subject) { }
+    record CurrentUserResponse(@Schema(description = "Keycloak ID of the person currently signed in.")
+            String currentUserId) { }
 }

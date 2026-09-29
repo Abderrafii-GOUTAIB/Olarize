@@ -22,7 +22,7 @@ class CurrentUserOpenApiConfiguration {
         operation.setSummary("List my active company memberships");
         operation.setDescription("Returns the companies that the signed-in user is currently an active member of. "
             + "Each item includes the company ID and name, membership ID, current permissions, and membership version. "
-            + "The user is identified from the validated Keycloak access token; no subject or company ID is accepted "
+            + "The user is identified from the validated Keycloak access token; no user ID or company ID is accepted "
             + "as proof of membership. If the user has no active memberships, this endpoint returns an empty list. "
             + "Memberships are loaded from current database state on every request, so changes and revocations are reflected "
             + "on the next request. Requires the profile.read scope.");
@@ -56,14 +56,27 @@ class CurrentUserOpenApiConfiguration {
         var item = api.getPaths().get("/api/v1/identity");
         if (item == null || item.getGet() == null) return;
         var operation = item.getGet();
-        operation.setSummary("Return the authenticated external subject");
-        operation.setDescription("Returns the subject identifier (`sub`) from the validated Keycloak access token. "
-            + "This is the identity-provider ID, not an employee ID, and does not grant access to company or HR data. "
+        operation.setSummary("Return the current user ID");
+        operation.setDescription("Returns currentUserId from the validated Keycloak access token. "
+            + "This identifies the signed-in person and does not grant access to company or HR data. "
             + "Requires the profile.read scope.");
         secure(operation);
         operation.getResponses().computeIfAbsent("200", code -> new ApiResponse())
-            .setDescription("The authenticated subject identifier from the access token.");
+            .setDescription("The signed-in person's Keycloak user ID from the access token.");
         operation.getResponses().addApiResponse("403", new ApiResponse().description("The access token is valid but does not include profile.read"));
+    }
+
+    private static void secureMembershipAdministration(io.swagger.v3.oas.models.OpenAPI api) {
+        secure(api, "/api/v1/companies/{companyId}/memberships", false);
+        secure(api, "/api/v1/companies/{companyId}/membership-change-previews", true);
+        secure(api, "/api/v1/companies/{companyId}/membership-changes/confirm", true);
+    }
+
+    private static void secure(io.swagger.v3.oas.models.OpenAPI api, String path, boolean post) {
+        var pathItem = api.getPaths().get(path);
+        if (pathItem == null) return;
+        var operation = post ? pathItem.getPost() : pathItem.getGet();
+        if (operation != null) secure(operation);
     }
 
     @Bean
@@ -72,6 +85,7 @@ class CurrentUserOpenApiConfiguration {
             documentCurrentUser(api);
             documentMemberships(api);
             documentCompanyContext(api);
+            secureMembershipAdministration(api);
         };
     }
 }

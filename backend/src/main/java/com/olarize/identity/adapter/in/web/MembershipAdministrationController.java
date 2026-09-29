@@ -32,7 +32,7 @@ class MembershipAdministrationController {
 
     @GetMapping(value = "/memberships", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "List company memberships",
-            description = "Lists membership subjects, current status, fixed role bundle, explicit permissions and version for one company. Requires a valid Keycloak token with profile.read and an active identity.admin membership in that company. The company ID selects scope but does not grant access. Identity-administrator entries are visible but cannot be changed through this API.")
+            description = "Lists each member's userId, current status, fixed role bundle, explicit permissions and version for one company. userId is the member's Keycloak user ID and can be copied into a preview request. Requires a valid Keycloak token with profile.read and an active identity.admin membership in that company. The company ID selects scope but does not grant access. Identity-administrator entries are visible but cannot be changed through this API.")
     ResponseEntity<List<ManagedMembershipResponse>> list(@PathVariable UUID companyId) {
         try {
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
@@ -45,11 +45,11 @@ class MembershipAdministrationController {
     @PostMapping(value = "/membership-change-previews", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Preview a membership change",
-            description = "Previews an exact grant, role change, reactivation or revocation. Grants and reactivations verify the target's Keycloak subject. The signed preview contains the target, company, action, permissions, current versions and reason, expires after 30 minutes, and does not write membership state. Only HR_ADMIN, MANAGER, EMPLOYEE and PAYROLL_OPERATOR bundles are assignable; identity.admin cannot be granted or edited.")
+            description = "Previews an exact grant, role change, reactivation or revocation. Copy userId from the membership row to choose the member. Grants and reactivations verify that Keycloak user ID. The signed preview contains the user, company, action, permissions, current versions and reason, expires after 30 minutes, and does not write membership state. Only HR_ADMIN, MANAGER, EMPLOYEE and PAYROLL_OPERATOR bundles are assignable; identity.admin cannot be granted or edited.")
     ResponseEntity<MembershipPreviewResponse> preview(@PathVariable UUID companyId,
             @Valid @RequestBody MembershipChangePreviewRequest request) {
         try {
-            var preview = administration.preview(companyId, request.getTargetSubject(), request.getRoleBundle(), request.getReason());
+            var preview = administration.preview(companyId, request.getUserId(), request.getRoleBundle(), request.getReason());
             return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
                     .body(MembershipPreviewResponse.from(preview));
         } catch (CompanyAccessDenied denied) {

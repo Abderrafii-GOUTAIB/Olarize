@@ -10,10 +10,10 @@ import java.util.UUID;
 import javax.sql.DataSource;
 
 /** Dedicated command datasource only. Never registered as a web application bean. */
-public final class CompanyRegistrationPersistenceAdapter implements CompanyRegistrationPort {
+public final class CompanyRegistrationJdbcRepository implements CompanyRegistrationPort {
     private final DataSource datasource;
 
-    public CompanyRegistrationPersistenceAdapter(DataSource datasource) { this.datasource = datasource; }
+    public CompanyRegistrationJdbcRepository(DataSource datasource) { this.datasource = datasource; }
 
     @Override public CompanyIdentity register(CompanyRegistration input, UUID correlationId) {
         try (Connection connection = datasource.getConnection()) {

@@ -6,8 +6,6 @@ import com.olarize.identity.domain.exception.CompanyAccessDenied;
 import com.olarize.identity.domain.exception.InvalidMembershipPreview;
 import com.olarize.identity.domain.exception.MembershipChangeRejected;
 import com.olarize.identity.domain.model.Membership;
-import com.olarize.identity.domain.model.MembershipRoleBundle;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
@@ -17,16 +15,16 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
-class MembershipAdministrationPersistenceAdapter implements MembershipAdministrationPort {
+class MembershipAdministrationJdbcRepository implements MembershipAdministrationPort {
     private final JdbcTemplate database;
 
-    MembershipAdministrationPersistenceAdapter(JdbcTemplate database) { this.database = database; }
+    MembershipAdministrationJdbcRepository(JdbcTemplate database) { this.database = database; }
 
     @Override @Transactional(readOnly = true)
     public List<Membership> list(String actorSubject, UUID companyId) {
         try {
             return database.query("select * from public.list_company_identity_memberships(?, ?)",
-                    (row, index) -> membership(row), actorSubject, companyId);
+                    MembershipJdbcMapper.ADMINISTRATION_RESULT, actorSubject, companyId);
         } catch (DataAccessException failure) {
             throw translate(failure);
         }
@@ -37,7 +35,7 @@ class MembershipAdministrationPersistenceAdapter implements MembershipAdministra
         try {
             List<Membership> committed = database.query("""
                     select * from public.find_company_membership_change_retry(?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (row, index) -> membership(row), actorSubject, preview.companyId(), preview.targetSubject(),
+                    """, MembershipJdbcMapper.ADMINISTRATION_RESULT, actorSubject, preview.companyId(), preview.targetSubject(),
                     preview.action().name(), preview.roleBundle() == null ? null : preview.roleBundle().name(),
                     preview.actorVersion(), preview.targetVersion(), preview.reason(), idempotencyKey);
             if (committed.size() > 1) throw new IllegalStateException("Idempotency key returned multiple results");
@@ -53,20 +51,12 @@ class MembershipAdministrationPersistenceAdapter implements MembershipAdministra
         try {
             return database.queryForObject("""
                     select * from public.change_company_membership(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (row, index) -> membership(row), actorSubject, preview.companyId(), preview.targetSubject(),
+                    """, MembershipJdbcMapper.ADMINISTRATION_RESULT, actorSubject, preview.companyId(), preview.targetSubject(),
                     preview.action().name(), preview.roleBundle() == null ? null : preview.roleBundle().name(),
                     preview.actorVersion(), preview.targetVersion(), preview.reason(), idempotencyKey, correlationId);
         } catch (DataAccessException failure) {
             throw translate(failure);
         }
-    }
-
-    private static Membership membership(ResultSet row) throws SQLException {
-        String[] permissions = (String[]) row.getArray("permissions").getArray();
-        String bundle = row.getString("role_bundle");
-        return new Membership(row.getObject("membership_id", UUID.class), row.getObject("company_id", UUID.class),
-                java.util.Set.of(permissions), row.getString("status"), row.getLong("version"),
-                bundle == null ? null : MembershipRoleBundle.valueOf(bundle), row.getString("subject"));
     }
 
     private static RuntimeException translate(DataAccessException failure) {
