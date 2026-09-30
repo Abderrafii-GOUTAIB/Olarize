@@ -1,0 +1,60 @@
+path: /api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/contracts/{contractId}/corrections
+post:
+  operationId: correctEmploymentContractFacts
+  summary: Correct contract facts and preserve the prior version
+  description: Append a corrected contract facts version using the current expectedVersion, a reason, and an evidence reference. The new version is unreviewed. A stale correction conflicts; prior facts remain available as history. This operation does not assess legal validity or change employment, account, or payroll status.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {$ref: '#/components/parameters/CompanyId'}
+    - name: employeeId
+      in: path
+      required: true
+      description: Employee ID that owns the selected employment episode.
+      schema: {type: string, format: uuid}
+    - name: episodeId
+      in: path
+      required: true
+      description: Employment period that owns the contract facts.
+      schema: {type: string, format: uuid}
+    - name: contractId
+      in: path
+      required: true
+      description: Contract ID returned by the create endpoint.
+      schema: {type: string, format: uuid}
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema: {$ref: '#/components/schemas/CorrectContractRequest'}
+  responses:
+    '200':
+      description: New contract version and audit evidence were committed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ContractResponse'}
+    '400':
+      description: Invalid date interval, type code, version, reason, evidence reference, or unconfirmed request.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '401':
+      description: Missing or invalid Keycloak access token.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '403':
+      description: Current contract.write membership in the selected company is required.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '404':
+      description: Contract is unavailable in this company or employment episode.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '409':
+      description: Expected version is stale or the idempotency key was used with different facts.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

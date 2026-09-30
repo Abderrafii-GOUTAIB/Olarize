@@ -136,6 +136,9 @@ class CompanyContextIntegrationTests {
         owner.execute("grant select on identity_membership to membership_runtime");
         owner.execute("grant select, insert on employment_employee, employment_episode, employment_creation_audit, employment_creation_request to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_write_employee(uuid) to membership_runtime");
+        owner.execute("grant select, insert, update on employment_contract to membership_runtime");
+        owner.execute("grant select, insert on employment_contract_version, employment_contract_request to membership_runtime");
+        owner.execute("grant execute on function public.olarize_can_write_contract(uuid) to membership_runtime");
         owner.execute("grant execute on function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
         owner.execute("grant select on organization_company to olarize_identity_provisioner_owner");
         owner.execute("grant select, insert, update on identity_membership to olarize_identity_provisioner_owner");
@@ -457,6 +460,161 @@ class CompanyContextIntegrationTests {
              "site":"Casablanca","workEmail":"salma@demo.olarize.invalid",
              "idempotencyKey":"%s","confirm":true}
             """.formatted(reference, startDate, key);
+    }
+
+    private record EmployeeEpisode(UUID employeeId, UUID episodeId) { }
+
+    private EmployeeEpisode employeeEpisode(UUID companyId, String reference) {
+        UUID employeeId = UUID.randomUUID();
+        UUID episodeId = UUID.randomUUID();
+        owner.update("""
+                insert into employment_employee(id, company_id, reference, normalized_reference,
+                    name, version, recorded_at) values (?, ?, ?, ?, 'Synthetic Employee', 1, now())
+                """, employeeId, companyId, reference, reference.toLowerCase(java.util.Locale.ROOT));
+        owner.update("""
+                insert into employment_episode(id, employee_id, company_id, start_date, version, recorded_at)
+                values (?, ?, ?, DATE '2026-01-01', 1, now())
+                """, episodeId, employeeId, companyId);
+        return new EmployeeEpisode(employeeId, episodeId);
+    }
+
+    private String contractPath(UUID companyId, EmployeeEpisode employee) {
+        return "/api/v1/companies/" + companyId + "/employees/" + employee.employeeId()
+                + "/episodes/" + employee.episodeId() + "/contracts";
+    }
+
+    private String createContractRequest(UUID key, String endDate) {
+        return """
+                {"typeCode":"CDD","startDate":"2026-01-01","endDate":"%s",
+                 "sourceReference":"Synthetic contract archive item","idempotencyKey":"%s","confirm":true}
+                """.formatted(endDate, key);
+    }
+
+    private String correctContractRequest(UUID key, long expectedVersion, String endDate, String reason) {
+        return """
+                {"expectedVersion":%d,"typeCode":"CDD","startDate":"2026-01-01","endDate":"%s",
+                 "sourceReference":"Synthetic corrected contract source","reason":"%s",
+                 "evidenceReference":"Synthetic amendment record","idempotencyKey":"%s","confirm":true}
+                """.formatted(expectedVersion, endDate, reason, key);
+    }
+
+    @Test void hrCreatesCorrectsAndRetriesVersionedContractFacts() throws Exception {
+        UUID companyId = company();
+        String hr = subject();
+        membership(hr, companyId, "ACTIVE", "contract.write");
+        EmployeeEpisode employee = employeeEpisode(companyId, "EMP-CONTRACT-1");
+        String path = contractPath(companyId, employee);
+        Integer contractsBefore = owner.queryForObject("select count(*) from employment_contract", Integer.class);
+        UUID createKey = UUID.randomUUID();
+        String createBody = createContractRequest(createKey, "2027-08-31");
+
+        var created = authenticatedPost(path, token(hr), createBody);
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        var initial = json(created.body());
+        assertThat(initial.path("version").asLong()).isEqualTo(1);
+        assertThat(initial.path("reviewState").asText()).isEqualTo("UNREVIEWED");
+        assertThat(initial.path("endDateCompleteness").asText()).isEqualTo("RECORDED");
+        assertThat(authenticatedPost(path, token(hr), createBody).body()).isEqualTo(created.body());
+        assertThat(authenticatedPost(path, token(hr), createContractRequest(createKey, "2027-09-30"))
+                .statusCode()).isEqualTo(409);
+
+        UUID contractId = UUID.fromString(initial.path("contractId").asText());
+        String correctionPath = path + "/" + contractId + "/corrections";
+        UUID correctionKey = UUID.randomUUID();
+        String correctionBody = correctContractRequest(correctionKey, 1, "2027-12-31", "Date copied incorrectly");
+        var corrected = authenticatedPost(correctionPath, token(hr), correctionBody);
+        assertThat(corrected.statusCode()).as(corrected.body()).isEqualTo(200);
+        assertThat(json(corrected.body()).path("version").asLong()).isEqualTo(2);
+        assertThat(json(corrected.body()).path("endDate").asText()).isEqualTo("2027-12-31");
+        assertThat(json(corrected.body()).path("changeReason").asText()).isEqualTo("Date copied incorrectly");
+        assertThat(authenticatedPost(correctionPath, token(hr), correctionBody).body()).isEqualTo(corrected.body());
+        assertThat(authenticatedPost(correctionPath, token(hr),
+                correctContractRequest(UUID.randomUUID(), 1, "2027-12-31", "Stale correction"))
+                .statusCode()).isEqualTo(409);
+
+        assertThat(owner.queryForObject("select count(*) from employment_contract where company_id = ?", Integer.class, companyId)).isEqualTo(1);
+        assertThat(owner.queryForObject("select count(*) from employment_contract_version where contract_id = ?", Integer.class, contractId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select end_date from employment_contract_version where contract_id = ? and version = 1", java.time.LocalDate.class, contractId))
+                .isEqualTo(java.time.LocalDate.of(2027, 8, 31));
+        assertThat(owner.queryForObject("select current_version from employment_contract where id = ?", Long.class, contractId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select count(*) from employment_contract", Integer.class))
+                .isEqualTo(contractsBefore + 1);
+        new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()))
+                .execute(status -> {
+                    scope.apply(jdbc, hr, companyId);
+                    assertThat(jdbc.queryForObject("select count(*) from employment_contract where id = ?", Integer.class, contractId)).isEqualTo(1);
+                    return null;
+                });
+        assertThat(owner.queryForObject("select last_employed_day from employment_episode where id = ?", java.time.LocalDate.class, employee.episodeId()))
+                .isNull();
+    }
+
+    @Test void contractWritesRequireCurrentCompanyPermissionAndRejectForeignOrInvalidFacts() throws Exception {
+        UUID companyA = company(); UUID companyB = company();
+        String hrA = subject(); String hrB = subject(); String ordinary = subject();
+        UUID hrMembership = membership(hrA, companyA, "ACTIVE", "contract.write");
+        membership(hrB, companyB, "ACTIVE", "contract.write");
+        membership(ordinary, companyA, "ACTIVE", "contract.read");
+        EmployeeEpisode employeeA = employeeEpisode(companyA, "EMP-CONTRACT-A");
+        EmployeeEpisode employeeB = employeeEpisode(companyB, "EMP-CONTRACT-B");
+        String pathA = contractPath(companyA, employeeA);
+        String pathB = contractPath(companyB, employeeB);
+
+        assertThat(authenticatedPost(pathA, token(ordinary), createContractRequest(UUID.randomUUID(), "2027-01-01")).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(pathB, token(hrA), createContractRequest(UUID.randomUUID(), "2027-01-01")).statusCode()).isEqualTo(403);
+        String foreignPath = "/api/v1/companies/" + companyA + "/employees/" + employeeB.employeeId()
+                + "/episodes/" + employeeB.episodeId() + "/contracts";
+        assertThat(authenticatedPost(foreignPath, token(hrA), createContractRequest(UUID.randomUUID(), "2027-01-01")).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(pathA, token(hrA), createContractRequest(UUID.randomUUID(), "2025-12-31")).statusCode()).isEqualTo(400);
+        String invalidCode = createContractRequest(UUID.randomUUID(), "2027-01-01").replace("\"typeCode\":\"CDD\"", "\"typeCode\":\"LEGAL_VERDICT\"");
+        var invalid = authenticatedPost(pathA, token(hrA), invalidCode);
+        assertThat(invalid.statusCode()).isEqualTo(400);
+        String unsupportedOtherCode = createContractRequest(UUID.randomUUID(), "2027-01-01")
+                .replace("\"typeCode\":\"CDD\"", "\"typeCode\":\"OTHER\"");
+        assertThat(authenticatedPost(pathA, token(hrA), unsupportedOtherCode).statusCode()).isEqualTo(400);
+        assertThat(invalid.body()).doesNotContain("LEGAL_VERDICT");
+        assertThat(owner.queryForObject("select count(*) from employment_contract", Integer.class)).isZero();
+        owner.update("update identity_membership set status = 'REVOKED', version = version + 1 where id = ?", hrMembership);
+        assertThat(authenticatedPost(pathA, token(hrA), createContractRequest(UUID.randomUUID(), "2027-01-01")).statusCode()).isEqualTo(403);
+    }
+
+    @Test void contractVersionAuditFailureRollsBackAndSameRequestCanRetry() throws Exception {
+        UUID companyId = company(); String hr = subject();
+        membership(hr, companyId, "ACTIVE", "contract.write");
+        EmployeeEpisode employee = employeeEpisode(companyId, "EMP-CONTRACT-ROLLBACK");
+        String path = contractPath(companyId, employee);
+        String body = createContractRequest(UUID.randomUUID(), "2027-01-01");
+        owner.execute("""
+                create function reject_contract_version() returns trigger language plpgsql as $$
+                begin raise exception 'synthetic contract audit outage'; end; $$
+                """);
+        owner.execute("create trigger reject_contract_version before insert on employment_contract_version for each row execute function reject_contract_version()");
+        try {
+            assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(500);
+        } finally {
+            owner.execute("drop trigger reject_contract_version on employment_contract_version");
+            owner.execute("drop function reject_contract_version()");
+        }
+        assertThat(owner.queryForObject("select count(*) from employment_contract where company_id = ?", Integer.class, companyId)).isZero();
+        assertThat(owner.queryForObject("select count(*) from employment_contract_request where company_id = ?", Integer.class, companyId)).isZero();
+        assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(201);
+    }
+
+    @Test void simultaneousCorrectionsWithTheSameVersionAllowOnlyOneChange() throws Exception {
+        UUID companyId = company(); String hr = subject();
+        membership(hr, companyId, "ACTIVE", "contract.write");
+        EmployeeEpisode employee = employeeEpisode(companyId, "EMP-CONTRACT-RACE");
+        String path = contractPath(companyId, employee);
+        var created = authenticatedPost(path, token(hr), createContractRequest(UUID.randomUUID(), "2027-01-01"));
+        UUID contractId = UUID.fromString(json(created.body()).path("contractId").asText());
+        String correctionPath = path + "/" + contractId + "/corrections";
+        String first = correctContractRequest(UUID.randomUUID(), 1, "2027-02-01", "Correction A");
+        String second = correctContractRequest(UUID.randomUUID(), 1, "2027-03-01", "Correction B");
+        var responses = concurrentPosts(correctionPath, token(hr), first, second);
+        assertThat(responses).extracting(HttpResponse::statusCode).containsExactlyInAnyOrder(200, 409);
+        assertThat(owner.queryForObject("select count(*) from employment_contract_version where contract_id = ?", Integer.class, contractId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select current_version from employment_contract where id = ?", Long.class, contractId)).isEqualTo(2);
     }
 
 
