@@ -28,6 +28,7 @@ Accepted recorded type codes: `CDI`, `CDD`, `SPECIFIED_WORK`, `UNKNOWN`. Treat t
 ## Verification
 
 - `./scripts/verify-backend.sh` — BUILD SUCCESS; 92 tests, 0 failures/errors/skips; PostgreSQL Testcontainers migrations through V904 and JPA validation passed.
+- Exact idempotent create/correction responses are tested against PostgreSQL timestamp precision; response timestamps use microsecond precision so retries match the committed result.
 - `git diff --check` — passed.
 - Independent `olarize-review` — no remaining findings after aligning accepted contract codes to `CDI`, `CDD`, `SPECIFIED_WORK`, `UNKNOWN`.
 
