@@ -140,6 +140,7 @@ class CompanyContextIntegrationTests {
         owner.execute("grant select, insert on employment_contract_version, employment_contract_request to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_write_contract(uuid) to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_read_contract(uuid) to membership_runtime");
+        owner.execute("grant execute on function public.olarize_can_read_employee(uuid) to membership_runtime");
         owner.execute("grant execute on function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
         owner.execute("grant select on organization_company to olarize_identity_provisioner_owner");
         owner.execute("grant select, insert, update on identity_membership to olarize_identity_provisioner_owner");
@@ -598,6 +599,92 @@ class CompanyContextIntegrationTests {
         assertThat(owner.queryForObject("select count(*) from employment_contract", Integer.class)).isZero();
         owner.update("update identity_membership set status = 'REVOKED', version = version + 1 where id = ?", hrMembership);
         assertThat(authenticatedPost(pathA, token(hrA), createContractRequest(UUID.randomUUID(), "2027-01-01")).statusCode()).isEqualTo(403);
+    }
+
+    @Test void hrSearchesDuplicateNamesStatusesAndScopedDetails() throws Exception {
+        UUID companyA = company(); UUID companyB = company();
+        String hr = subject(); String ordinary = subject();
+        UUID hrMembership = membership(hr, companyA, "ACTIVE", "employee.read");
+        membership(ordinary, companyA, "ACTIVE", "employee.self.read");
+        var first = employeeEpisode(companyA, "EMP-0001");
+        var second = employeeEpisode(companyA, "EMP-0002");
+        var ended = employeeEpisode(companyA, "EMP-0003");
+        var upcoming = employeeEpisode(companyA, "EMP-0004");
+        var foreign = employeeEpisode(companyB, "EMP-0001");
+        owner.update("update employment_employee set name = 'Ahmed El Amrani' where id in (?, ?)", first.employeeId(), second.employeeId());
+        owner.update("update employment_episode set last_employed_day = DATE '2026-09-29' where id = ?", ended.episodeId());
+        owner.update("update employment_episode set start_date = DATE '2026-10-01' where id = ?", upcoming.episodeId());
+        // A later episode must not duplicate an employee or replace the episode relevant to asOf.
+        owner.update("insert into employment_episode(id, employee_id, company_id, start_date, recorded_at) values (?, ?, ?, DATE '2027-01-01', now())",
+                UUID.randomUUID(), first.employeeId(), companyA);
+        String base = "/api/v1/companies/" + companyA + "/employees";
+        String bearer = token(hr);
+        var page = authenticatedGet(base + "?asOf=2026-09-30&search=ahmed&pageSize=1", bearer);
+        assertThat(page.statusCode()).as(page.body()).isEqualTo(200);
+        var body = json(page.body());
+        assertThat(body.path("items").get(0).path("reference").asText()).isEqualTo("EMP-0001");
+        assertThat(body.path("items").get(0).path("episodeId").asText()).isEqualTo(first.episodeId().toString());
+        assertThat(body.path("pagination").path("totalItems").asLong()).isEqualTo(2);
+        assertThat(page.headers().firstValue("Cache-Control")).hasValue("no-store");
+        var next = authenticatedGet(base + "?asOf=2026-09-30&search=Ahmed&pageSize=1&page=1", bearer);
+        assertThat(json(next.body()).path("items").get(0).path("reference").asText()).isEqualTo("EMP-0002");
+        assertThat(json(authenticatedGet(base + "?asOf=2026-09-30&status=ALL", bearer).body())
+                .path("pagination").path("totalItems").asLong()).isEqualTo(4);
+        assertThat(json(authenticatedGet(base + "?asOf=2026-09-30&status=ENDED", bearer).body())
+                .path("items").get(0).path("employeeId").asText()).isEqualTo(ended.employeeId().toString());
+        assertThat(json(authenticatedGet(base + "?asOf=2026-09-30&status=UPCOMING", bearer).body())
+                .path("items").get(0).path("employeeId").asText()).isEqualTo(upcoming.employeeId().toString());
+        assertThat(json(authenticatedGet(base + "?asOf=2026-09-29&status=CURRENT", bearer).body())
+                .path("pagination").path("totalItems").asLong()).isEqualTo(3);
+        assertThat(json(authenticatedGet(base + "?asOf=2026-10-01&status=UPCOMING", bearer).body()).path("items").isEmpty()).isTrue();
+        assertThat(json(authenticatedGet(base + "?asOf=2026-09-30&search=EMP-0002", bearer).body())
+                .path("items").get(0).path("employeeId").asText()).isEqualTo(second.employeeId().toString());
+        assertThat(json(authenticatedGet(base + "?search=%25", bearer).body()).path("items").isEmpty()).isTrue();
+        var detail = authenticatedGet(base + "/" + first.employeeId() + "?asOf=2026-09-30", bearer);
+        assertThat(detail.statusCode()).as(detail.body()).isEqualTo(200);
+        assertThat(json(detail.body()).path("name").asText()).isEqualTo("Ahmed El Amrani");
+        assertThat(authenticatedGet(base + "/" + foreign.employeeId(), bearer).statusCode()).isEqualTo(404);
+        assertThat(authenticatedGet(base + "/" + UUID.randomUUID(), bearer).statusCode()).isEqualTo(404);
+        assertThat(authenticatedGet(base.replace(companyA.toString(), companyB.toString()), bearer).statusCode()).isEqualTo(403);
+        assertThat(authenticatedGet(base, token(ordinary)).statusCode()).isEqualTo(403);
+        assertThat(authenticatedGet(base + "/" + first.employeeId(), token(ordinary)).statusCode()).isEqualTo(403);
+        assertThat(authenticatedGet(base, "invalid-token").statusCode()).isEqualTo(401);
+        for (String query : List.of("page=-1", "pageSize=101", "pageSize=0", "page=2147483647&pageSize=100", "status=UNKNOWN", "asOf=bad", "unknown=true", "page=0&page=1")) {
+            var invalid = authenticatedGet(base + "?" + query, bearer);
+            assertThat(invalid.statusCode()).as(query).isEqualTo(400);
+            var problem = json(invalid.body());
+            assertThat(problem.path("status").asInt()).isEqualTo(400);
+            assertThat(problem.path("requestId").asText()).isNotBlank();
+            assertThat(invalid.body()).doesNotContain("2147483647", "Hibernate", "SQL");
+        }
+        var transactions = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        assertThat(jdbc.queryForObject("select count(*) from employment_employee", Integer.class)).isZero();
+        transactions.execute(status -> {
+            jdbc.queryForObject("select set_config('olarize.company_id', ?, true)", String.class, companyA.toString());
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee", Integer.class)).isZero();
+            scope.apply(jdbc, hr, companyA);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee", Integer.class)).isEqualTo(4);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyB)).isZero();
+            return null;
+        });
+        owner.update("update identity_membership set status = 'REVOKED' where id = ?", hrMembership);
+        assertThat(authenticatedGet(base, bearer).statusCode()).isEqualTo(403);
+        assertThat(authenticatedGet(base + "/" + first.employeeId(), bearer).statusCode()).isEqualTo(403);
+    }
+
+    @Test void directoryDatabaseFailureReturnsProblemInsteadOfEmptySuccess() throws Exception {
+        UUID companyId = company(); String hr = subject();
+        membership(hr, companyId, "ACTIVE", "employee.read");
+        owner.execute("revoke select on employment_employee from membership_runtime");
+        try {
+            var response = authenticatedGet("/api/v1/companies/" + companyId + "/employees", token(hr));
+            assertThat(response.statusCode()).isEqualTo(500);
+            assertThat(json(response.body()).path("requestId").asText()).isNotBlank();
+            assertThat(response.body()).doesNotContain("permission denied", "employment_employee", "select ");
+        } finally {
+            owner.execute("grant select on employment_employee to membership_runtime");
+        }
     }
 
     @Test void expiryListUsesCurrentVersionsInclusiveDatesStablePagesAndCompanyScopedCoverage() throws Exception {

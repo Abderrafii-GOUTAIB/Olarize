@@ -1,0 +1,52 @@
+path: /api/v1/companies/{companyId}/employees
+get:
+  operationId: listCompanyEmployees
+  summary: Search company employees
+  description: Search literal partial text in names or references. Duplicate names remain separate employee records. Requires current employee.read and profile.read. Defaults to CURRENT; select UPCOMING, ENDED or ALL explicitly. Episode start and last employed day are inclusive; contract expiry does not determine employment status. Select the latest started episode as of the date, otherwise the earliest upcoming episode. Same-date ties use episode ID. Results and counts are company-scoped, ordered by normalized reference then employee ID. Responses use Cache-Control no-store.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {$ref: '#/components/parameters/CompanyId'}
+    - name: search
+      in: query
+      description: Literal partial name or reference; blank means no search filter.
+      schema: {type: string, maxLength: 200, example: Ahmed}
+    - name: status
+      in: query
+      schema: {type: string, enum: [CURRENT, UPCOMING, ENDED, ALL], default: CURRENT}
+    - name: asOf
+      in: query
+      description: Civil date used to select an episode and derive status; defaults to today in Africa/Casablanca.
+      schema: {type: string, format: date, example: '2026-09-30'}
+    - name: page
+      in: query
+      schema: {type: integer, minimum: 0, default: 0}
+    - name: pageSize
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+  responses:
+    '200':
+      description: Company-scoped employee page; an authorized no-match query returns empty items with a zero count.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/EmployeeDirectoryResponseDto'}
+    '400':
+      description: Invalid UUID, filter, date, pagination (including row offset above 2147483647) or unknown/duplicate query parameter.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '401':
+      description: Missing or invalid Keycloak access token.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '403':
+      description: Current employee.read membership in the selected company is required.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '500':
+      description: Database unavailable; sanitized problem response includes requestId.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

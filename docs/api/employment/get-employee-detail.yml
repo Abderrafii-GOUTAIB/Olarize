@@ -1,0 +1,45 @@
+path: /api/v1/companies/{companyId}/employees/{employeeId}
+get:
+  operationId: getCompanyEmployee
+  summary: Inspect an employee record
+  description: Return minimum employee and work facts with the selected episode and derived status. Copy employeeId from the directory. Requires current employee.read and profile.read. Missing and foreign-company employees return the same scoped 404. Private contact, national identity, salary and document fields are excluded. Responses use Cache-Control no-store.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {$ref: '#/components/parameters/CompanyId'}
+    - {$ref: '#/components/parameters/EmployeeId'}
+    - name: asOf
+      in: query
+      description: Civil date used to select an episode and derive status; defaults to today in Africa/Casablanca.
+      schema: {type: string, format: date, example: '2026-09-30'}
+  responses:
+    '200':
+      description: Employee work facts, selected episode and explicit as-of date.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/EmployeeDetailResponseDto'}
+    '400':
+      description: Invalid UUID, filter, date, pagination or unknown/duplicate query parameter.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '401':
+      description: Missing or invalid Keycloak access token.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '403':
+      description: Current employee.read membership in the selected company is required.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '404':
+      description: Employee unavailable in the selected company; missing and foreign-company IDs have the same response.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '500':
+      description: Database unavailable; sanitized problem response includes requestId.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

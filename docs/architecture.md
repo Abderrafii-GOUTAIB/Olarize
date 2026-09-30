@@ -1,6 +1,6 @@
 # Olarize architecture and folder organization
 
-Olarize is a modular monolith: one Spring Boot application grouped by business capability, with clean dependency boundaries inside each module. The current implementation contains the platform/authentication foundation, ORG-001 company provisioning, EMP-001 trusted company context, IAM-001 membership administration, and IAM-002 PostgreSQL isolation for those existing tables. Product scope and future module ownership remain in .instructions/reference/product-v1.md and the development guidance.
+Olarize is a modular monolith: one Spring Boot application grouped by business capability, with clean dependency boundaries inside each module. The current implementation contains the platform/authentication foundation, ORG-001 company provisioning, EMP-001 trusted company context, IAM-001 membership administration, IAM-002 PostgreSQL isolation, employee creation, versioned contract facts and expiry queries, and EMP-003 employee directory/detail. Product scope and future module ownership remain in .instructions/reference/product-v1.md and the development guidance.
 
 ## Dependency direction
 
@@ -79,3 +79,7 @@ EMP-002 implements minimum employee creation in the employment module. EMP-004 a
 Web transport types use the `Dto` suffix and live in separate files. Module utilities stay near their callers; shared `common/util` is reserved for generic technical functions with actual reuse. No common utility folder is currently needed.
 
 Employment use-case failures (`EmployeeCreationConflict`, `ContractFactsConflict`, `ContractFactsNotFound`) live in `application/exception`. Domain business-rule failures belong in `domain/exception` when dedicated types are needed; HTTP translation stays in the web adapter.
+
+## Employee directory boundary
+
+EMP-003 uses `EmployeeDirectoryController`, separate request/response DTOs and `EmployeeDirectoryWebMapper`. `EmployeeDirectoryService` checks current `employee.read`, establishes signed company scope and opens a read-only transaction. `EmployeeDirectoryPersistenceAdapter` implements the focused port using `EmployeeDirectoryJpaRepository`; `EmployeeDirectoryPersistenceMapper` maps private JPA entities into application records. PostgreSQL SELECT policies enforce the same current permission. JDBC is used only for the existing signed transaction-local scope operation. Directory counts and pages share episode selection, search and company predicates. See [employee directory](employee-directory.md).

@@ -111,3 +111,5 @@ Verified 2026-09-28 for EMP-001: after the package/service naming refactor and c
 Verified on 2026-09-30 after OLARIZE-4 and the identity/employment web package split: `./scripts/verify-backend.sh` passed 97 tests with PostgreSQL Testcontainers, HTTP, Swagger and architecture checks. Transport classes use `RequestDto`/`ResponseDto` in separate web DTO packages.
 
 Verified on 2026-09-30 after moving all business-module technical packages to `infrastructure` and splitting persistence into `entity`, `repository`, `mapper` and `adapter`: `./scripts/verify-backend.sh` passed all 97 tests. Independent structural review found no actionable issues.
+
+Verified on 2026-09-30 for OLARIZE-6 / EMP-003 directory/detail: full `./scripts/verify-backend.sh` passed 106 tests. After the review correction for JPA row-offset limits, focused `EmployeeDirectoryFilterTests,CompanyContextIntegrationTests` verification passed 33 tests. Local migrations and generated Swagger checks confirm five persistent demo employee records, including two Ahmed references. See [employee directory](employee-directory.md) for exact calls. Frontend and live browser login acceptance remain pending.
