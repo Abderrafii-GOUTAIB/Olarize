@@ -139,6 +139,7 @@ class CompanyContextIntegrationTests {
         owner.execute("grant select, insert, update on employment_contract to membership_runtime");
         owner.execute("grant select, insert on employment_contract_version, employment_contract_request to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_write_contract(uuid) to membership_runtime");
+        owner.execute("grant execute on function public.olarize_can_read_contract(uuid) to membership_runtime");
         owner.execute("grant execute on function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
         owner.execute("grant select on organization_company to olarize_identity_provisioner_owner");
         owner.execute("grant select, insert, update on identity_membership to olarize_identity_provisioner_owner");
@@ -498,6 +499,26 @@ class CompanyContextIntegrationTests {
                 """.formatted(expectedVersion, endDate, reason, key);
     }
 
+    private UUID contractFacts(UUID companyId, EmployeeEpisode employee, UUID contractId,
+            java.time.LocalDate currentEndDate, java.time.LocalDate previousEndDate) {
+        owner.update("insert into employment_contract(id,company_id,employee_id,episode_id,current_version,lock_version) values (?,?,?,?,2,0)",
+                contractId, companyId, employee.employeeId(), employee.episodeId());
+        for (int version = 1; version <= 2; version++) {
+            owner.update("""
+                    insert into employment_contract_version(id,contract_id,company_id,employee_id,episode_id,
+                        version,type_code,start_date,end_date,source_reference,review_state,actor_subject,
+                        operation,change_reason,evidence_reference,correlation_id,recorded_at)
+                    values (?,?,?,?,?,?,'CDD',DATE '2026-01-01',?,'Synthetic expiry fixture','UNREVIEWED',
+                        'test-fixture',?, ?, ?, 'expiry-test', now())
+                    """, UUID.randomUUID(), contractId, companyId, employee.employeeId(), employee.episodeId(), version,
+                    version == 1 ? previousEndDate : currentEndDate,
+                    version == 1 ? "CREATE" : "CORRECT",
+                    version == 1 ? null : "Corrected fixture date",
+                    version == 1 ? null : "Synthetic correction evidence");
+        }
+        return contractId;
+    }
+
     @Test void hrCreatesCorrectsAndRetriesVersionedContractFacts() throws Exception {
         UUID companyId = company();
         String hr = subject();
@@ -577,6 +598,53 @@ class CompanyContextIntegrationTests {
         assertThat(owner.queryForObject("select count(*) from employment_contract", Integer.class)).isZero();
         owner.update("update identity_membership set status = 'REVOKED', version = version + 1 where id = ?", hrMembership);
         assertThat(authenticatedPost(pathA, token(hrA), createContractRequest(UUID.randomUUID(), "2027-01-01")).statusCode()).isEqualTo(403);
+    }
+
+    @Test void expiryListUsesCurrentVersionsInclusiveDatesStablePagesAndCompanyScopedCoverage() throws Exception {
+        UUID companyA = company(); UUID companyB = company();
+        String hrA = subject(); String payrollUser = subject();
+        membership(hrA, companyA, "ACTIVE", "contract.read");
+        membership(payrollUser, companyA, "ACTIVE", "payroll.roster.read");
+        EmployeeEpisode employeeA = employeeEpisode(companyA, "EMP-EXPIRY-A");
+        EmployeeEpisode employeeB = employeeEpisode(companyB, "EMP-EXPIRY-B");
+        UUID firstContract = UUID.fromString("00000000-0000-4000-8000-000000000101");
+        UUID secondContract = UUID.fromString("00000000-0000-4000-8000-000000000102");
+        contractFacts(companyA, employeeA, firstContract, java.time.LocalDate.of(2027, 8, 31),
+                java.time.LocalDate.of(2027, 7, 31));
+        contractFacts(companyA, employeeA, secondContract, java.time.LocalDate.of(2027, 8, 31),
+                java.time.LocalDate.of(2027, 8, 31));
+        contractFacts(companyA, employeeA, UUID.randomUUID(), java.time.LocalDate.of(2027, 8, 30), null);
+        contractFacts(companyA, employeeA, UUID.randomUUID(), java.time.LocalDate.of(2027, 9, 1), null);
+        contractFacts(companyA, employeeA, UUID.randomUUID(), null, null);
+        contractFacts(companyB, employeeB, UUID.randomUUID(), java.time.LocalDate.of(2027, 8, 31), null);
+        contractFacts(companyB, employeeB, UUID.randomUUID(), null, null);
+
+        String base = "/api/v1/companies/" + companyA + "/contracts/expiring?fromDate=2027-08-31&toDate=2027-08-31&pageSize=1";
+        var firstPage = authenticatedGet(base, token(hrA));
+        assertThat(firstPage.statusCode()).as(firstPage.body()).isEqualTo(200);
+        var firstPageJson = json(firstPage.body());
+        assertThat(firstPageJson.path("items").size()).isEqualTo(1);
+        assertThat(firstPageJson.path("items").get(0).path("contractId").asText()).isEqualTo(firstContract.toString());
+        assertThat(firstPageJson.path("items").get(0).path("contractVersion").asLong()).isEqualTo(2);
+        assertThat(firstPageJson.path("pagination").path("totalItems").asLong()).isEqualTo(2);
+        assertThat(firstPageJson.path("pagination").path("totalPages").asInt()).isEqualTo(2);
+        assertThat(firstPageJson.path("currentContractsWithoutRecordedEndDate").asLong()).isEqualTo(1);
+        assertThat(firstPageJson.path("items").get(0).path("employeeReference").asText()).isEqualTo("EMP-EXPIRY-A");
+
+        var secondPage = authenticatedGet(base + "&page=1", token(hrA));
+        assertThat(secondPage.statusCode()).isEqualTo(200);
+        assertThat(json(secondPage.body()).path("items").get(0).path("contractId").asText())
+                .isEqualTo(secondContract.toString());
+        var empty = authenticatedGet(base.replace("2027-08-31", "2027-09-02"), token(hrA));
+        assertThat(empty.statusCode()).isEqualTo(200);
+        assertThat(json(empty.body()).path("items").isEmpty()).isTrue();
+        assertThat(json(empty.body()).path("pagination").path("totalItems").asLong()).isZero();
+        assertThat(authenticatedGet(base, token(payrollUser)).statusCode()).isEqualTo(403);
+        assertThat(authenticatedGet(base.replace(companyA.toString(), companyB.toString()), token(hrA)).statusCode())
+                .isEqualTo(403);
+        assertThat(authenticatedGet(base + "&unknown=true", token(hrA)).statusCode()).isEqualTo(400);
+        assertThat(authenticatedGet(base + "&pageSize=101", token(hrA)).statusCode()).isEqualTo(400);
+        assertThat(authenticatedGet(base, "invalid-token").statusCode()).isEqualTo(401);
     }
 
     @Test void contractVersionAuditFailureRollsBackAndSameRequestCanRetry() throws Exception {
@@ -1017,7 +1085,7 @@ class CompanyContextIntegrationTests {
         var output = new java.io.ByteArrayOutputStream(); var errors = new java.io.ByteArrayOutputStream();
         var env = java.util.Map.of("IDENTITY_PROVISION_DB_URL", POSTGRES.getJdbcUrl(), "IDENTITY_PROVISION_DB_USERNAME", user,
             "IDENTITY_PROVISION_DB_PASSWORD", user.equals(POSTGRES.getUsername()) ? POSTGRES.getPassword() : "synthetic-only");
-        int exit = com.olarize.identity.adapter.in.cli.ProvisionMembershipCommand.run(new String[]{"provision-membership"},
+        int exit = com.olarize.identity.infrastructure.in.cli.ProvisionMembershipCommand.run(new String[]{"provision-membership"},
             new java.io.ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)), new java.io.PrintStream(output), new java.io.PrintStream(errors), env);
         return new CommandResult(exit, output.toString(StandardCharsets.UTF_8), errors.toString(StandardCharsets.UTF_8));
     }

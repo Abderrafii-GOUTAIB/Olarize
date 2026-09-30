@@ -28,11 +28,11 @@ olarize/                             Existing folder may still be named hr ai sy
         internal/web/                Error contract, request IDs, local API setup
       identity/
         package-info.java            Identity module boundary
-        adapter/in/web/               HTTP controllers and API documentation
+        infrastructure/in/web/               HTTP controllers and API documentation
       employment/
         domain/                       Minimum employee facts and status
         application/                  Create use case, permission and transaction
-        adapter/                      DTOs, JPA entities, repositories and mappers
+        infrastructure/               DTOs, JPA entities, repositories and mappers
     src/main/resources/
       application.yml                Safe common configuration
       application-local.yml          Explicit local migration behavior
@@ -57,7 +57,7 @@ infra/keycloak/ contains the local realm import. The frontend implementation fol
 
 Use package-by-business-module, then separate public contracts, domain rules, application ports/services and adapters as a feature requires them. Name application service classes with the `Service` suffix. `com.olarize` is the Java package prefix and contains only the application entry point; it is not a catch-all feature package. Dependency direction points toward the domain. Domain code must not import Spring, JPA, HTTP or AI providers. Use small cohesive classes, constructor injection, explicit types and meaningful business names. Avoid global utility/service classes and speculative abstractions.
 
-Business modules follow `domain/{model,service,event,exception}`, `application/{port/in,port/out,service,command,query}`, and `adapter/{in/{web,messaging,cli},out/{persistence,messaging,external}}` when those folders are needed. We do not create empty folders. The current `identity` and `organization` source trees are examples.
+Business modules follow `domain/{model,service,event,exception}`, `application/{port/in,port/out,service,exception,command,query}`, and `infrastructure/{in/{web,messaging,cli},out/{persistence,messaging,external,security}}` when those folders are needed. We do not create empty folders. The current `identity`, `organization` and `employment` source trees are examples. Web adapters separate `controller`, `dto/request`, `dto/response`, `mapper` and `configuration`; transport classes use `RequestDto`/`ResponseDto` suffixes. Persistence separates `entity`, `repository`, `mapper` and `adapter`.
 
 Controllers keep only HTTP mapping and input/output mapping annotations. Endpoint documentation lives beside the web adapter in local OpenAPI configuration; authentication rules remain in the security configuration. Do not add an interface or empty application/domain layer solely to hide annotations.
 

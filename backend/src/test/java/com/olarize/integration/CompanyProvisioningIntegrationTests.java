@@ -2,9 +2,9 @@ package com.olarize.integration;
 
 import com.olarize.organization.application.port.in.CompanyLookupPort;
 import com.olarize.organization.application.port.in.CompanyReadAuthorizationPort;
-import com.olarize.organization.adapter.in.cli.ProvisionCompanyCommand;
-import com.olarize.organization.adapter.out.persistence.CompanyLookupJdbcRepository;
-import com.olarize.organization.adapter.out.persistence.CompanyRegistrationJdbcRepository;
+import com.olarize.organization.infrastructure.in.cli.ProvisionCompanyCommand;
+import com.olarize.organization.infrastructure.out.persistence.repository.CompanyLookupJdbcRepository;
+import com.olarize.organization.infrastructure.out.persistence.repository.CompanyRegistrationJdbcRepository;
 import com.olarize.organization.domain.model.CompanyRegistration;
 import com.olarize.organization.domain.exception.RegistrationConflict;
 import com.zaxxer.hikari.HikariConfig;
