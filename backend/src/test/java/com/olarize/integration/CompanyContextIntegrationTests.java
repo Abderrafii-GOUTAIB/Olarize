@@ -43,6 +43,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     properties = {"spring.flyway.enabled=false", "spring.datasource.hikari.maximum-pool-size=2",
         "spring.datasource.hikari.connection-timeout=1000"})
 class CompanyContextIntegrationTests {
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class AssistantEvaluationConfiguration {
+        @org.springframework.context.annotation.Bean
+        @org.springframework.context.annotation.Primary
+        com.olarize.assistant.application.port.out.ExpiryIntentPort syntheticExpiryIntent() {
+            return question -> {
+                if ("simulate provider failure".equals(question)) throw new com.olarize.assistant.application.exception.AssistantUnavailable();
+                return new com.olarize.assistant.infrastructure.out.provider.SyntheticExpiryPlanner().plan(question);
+            };
+        }
+    }
     static final String SCOPE_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     static final RSAKey SIGNING_KEY;
     static final RSAKey UNTRUSTED_KEY;
@@ -134,6 +145,7 @@ class CompanyContextIntegrationTests {
         owner.execute("alter table identity_membership_audit owner to membership_migrator");
         owner.execute("alter function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) owner to membership_migrator");
         owner.execute("grant select on identity_membership to membership_runtime");
+        owner.execute("grant select, insert on assistant_conversation to membership_runtime");
         owner.execute("grant select, insert on employment_employee, employment_episode, employment_creation_audit, employment_creation_request to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_write_employee(uuid) to membership_runtime");
         owner.execute("grant select, insert, update on employment_contract to membership_runtime");
@@ -685,6 +697,94 @@ class CompanyContextIntegrationTests {
         } finally {
             owner.execute("grant select on employment_employee to membership_runtime");
         }
+    }
+
+    @Test void expiryAssistantReturnsActualRecordsAndEnforcesConversationOwnership() throws Exception {
+        UUID companyA = company(); UUID companyB = company();
+        String hr = subject(); String otherHr = subject(); String employee = subject();
+        membership(hr, companyA, "ACTIVE", "contract.read");
+        membership(hr, companyB, "ACTIVE", "contract.read");
+        membership(otherHr, companyA, "ACTIVE", "contract.read");
+        membership(employee, companyA, "ACTIVE", "employee.self.read");
+        EmployeeEpisode employeeA = employeeEpisode(companyA, "EMP-TOOL-A");
+        EmployeeEpisode employeeB = employeeEpisode(companyB, "EMP-TOOL-B");
+        UUID contract = UUID.randomUUID();
+        var next = java.time.YearMonth.now(java.time.ZoneId.of("Africa/Casablanca")).plusMonths(1);
+        contractFacts(companyA, employeeA, contract, next.atDay(15), null);
+        contractFacts(companyB, employeeB, UUID.randomUUID(), next.atDay(15), null);
+        String base = "/api/v1/companies/" + companyA + "/assistant/conversations";
+        var created = authenticatedPost(base, token(hr), "");
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        assertThat(created.headers().firstValue("Cache-Control")).hasValue("no-store");
+        String id = json(created.body()).path("conversationId").asText();
+        String ask = base + "/" + id + "/contract-expiry-requests";
+        for (String question : List.of("Which contracts expire next month?", "Quels contrats expirent le mois prochain ?", "ما هي العقود التي تنتهي الشهر المقبل؟")) {
+            String body = new tools.jackson.databind.json.JsonMapper().writeValueAsString(Map.of("question", question));
+            var response = authenticatedPost(ask, token(hr), body);
+            assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+            var result = json(response.body());
+            assertThat(result.path("status").asText()).isEqualTo("RESULTS");
+            assertThat(result.path("result").path("fromDate").asText()).isEqualTo(next.atDay(1).toString());
+            assertThat(result.path("result").path("toDate").asText()).isEqualTo(next.atEndOfMonth().toString());
+            assertThat(result.path("result").path("totalItems").asInt()).isEqualTo(1);
+            assertThat(result.path("result").path("items").get(0).path("contractId").asText()).isEqualTo(contract.toString());
+            assertThat(result.path("result").path("items").get(0).path("employeeReference").asText()).isEqualTo("EMP-TOOL-A");
+            assertThat(response.body()).doesNotContain("EMP-TOOL-B");
+        }
+        var scopedTransaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        scopedTransaction.executeWithoutResult(status -> {
+            scope.apply(jdbc, hr, companyA);
+            assertThat(jdbc.queryForObject("select count(*) from assistant_conversation where id = ?", Integer.class, UUID.fromString(id))).isEqualTo(1);
+            scope.apply(jdbc, otherHr, companyA);
+            assertThat(jdbc.queryForObject("select count(*) from assistant_conversation where id = ?", Integer.class, UUID.fromString(id))).isZero();
+            scope.apply(jdbc, hr, companyB);
+            assertThat(jdbc.queryForObject("select count(*) from assistant_conversation where id = ?", Integer.class, UUID.fromString(id))).isZero();
+            jdbc.queryForObject("select set_config('olarize.subject', ?, true)", String.class, otherHr);
+            assertThat(jdbc.queryForObject("select count(*) from assistant_conversation", Integer.class)).isZero();
+        });
+        String body = "{\"question\":\"Which contracts expire next month?\"}";
+        assertThat(authenticatedPost(ask, token(otherHr), body).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(ask.replace(companyA.toString(), companyB.toString()), token(hr), body).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(ask, token(employee), body).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(base, token(employee), "").statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(ask, "invalid-token", body).statusCode()).isEqualTo(401);
+        assertThat(authenticatedPost(ask, token(hr), "{\"question\":\"Which contracts expire next month?\",\"userId\":\"other\"}").statusCode()).isEqualTo(400);
+        assertThat(authenticatedPost(ask, token(hr), "{\"question\":\"Which contracts expire next month?\",\"page\":2147483647,\"pageSize\":100}").statusCode()).isEqualTo(400);
+        var clarify = authenticatedPost(ask, token(hr), "{\"question\":\"Which contracts expire in October?\"}");
+        assertThat(clarify.statusCode()).isEqualTo(200);
+        assertThat(json(clarify.body()).path("status").asText()).isEqualTo("CLARIFICATION_REQUIRED");
+        assertThat(json(clarify.body()).path("result").isNull()).isTrue();
+        var unavailable = authenticatedPost(ask, token(hr), "{\"question\":\"simulate provider failure\"}");
+        assertThat(unavailable.statusCode()).isEqualTo(503);
+        assertThat(json(unavailable.body()).path("requestId").asText()).isNotBlank();
+        owner.update("update assistant_conversation set created_at = now() - interval '2 days', expires_at = now() - interval '1 day' where id = ?", UUID.fromString(id));
+        assertThat(authenticatedPost(ask, token(hr), body).statusCode()).isEqualTo(404);
+        var fresh = authenticatedPost(base, token(hr), "");
+        String freshId = json(fresh.body()).path("conversationId").asText();
+        owner.update("update identity_membership set status = 'REVOKED' where company_id = ? and subject = ?", companyA, hr);
+        assertThat(authenticatedPost(base + "/" + freshId + "/contract-expiry-requests", token(hr), body).statusCode()).isEqualTo(403);
+        assertThat(jdbc.queryForObject("select count(*) from assistant_conversation", Integer.class)).isZero();
+    }
+
+    @Test void assistantEmptyAndToolFailureAreDifferentResponses() throws Exception {
+        UUID companyId = company(); String hr = subject();
+        membership(hr, companyId, "ACTIVE", "contract.read");
+        String base = "/api/v1/companies/" + companyId + "/assistant/conversations";
+        var created = authenticatedPost(base, token(hr), "");
+        String ask = base + "/" + json(created.body()).path("conversationId").asText() + "/contract-expiry-requests";
+        String body = "{\"question\":\"Which contracts expire next month?\"}";
+        var empty = authenticatedPost(ask, token(hr), body);
+        assertThat(empty.statusCode()).isEqualTo(200);
+        assertThat(json(empty.body()).path("status").asText()).isEqualTo("EMPTY");
+        assertThat(json(empty.body()).path("result").path("totalItems").asInt()).isZero();
+        owner.execute("revoke select on employment_contract_version from membership_runtime");
+        try {
+            var unavailable = authenticatedPost(ask, token(hr), body);
+            assertThat(unavailable.statusCode()).isEqualTo(500);
+            assertThat(json(unavailable.body()).path("requestId").asText()).isNotBlank();
+            assertThat(unavailable.body()).doesNotContain("employment_contract", "select ", "permission denied");
+        } finally { owner.execute("grant select on employment_contract_version to membership_runtime"); }
     }
 
     @Test void expiryListUsesCurrentVersionsInclusiveDatesStablePagesAndCompanyScopedCoverage() throws Exception {

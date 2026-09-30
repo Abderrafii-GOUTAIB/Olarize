@@ -66,6 +66,13 @@ flowchart TD
     DirectoryAPI -->|employee ID selected by HR| DetailAPI[GET company employee detail]
     DetailAPI -->|same current permission and scope| DB
     DB -->|minimal work facts and selected episode| DirectoryHR
+    ToolHR[HR with contract.read]
+    ToolHR -->|create owned conversation| ConversationAPI[Assistant backend]
+    ConversationAPI -->|owner/company metadata and RLS| DB
+    ConversationAPI -->|question only; bounded local evaluation| Planner[Synthetic intent planner]
+    Planner -->|allowlisted date intent| ExpiryTool[Validated expiry tool]
+    ExpiryTool -->|public employment service; current permission| ExpiryAPI
+    ExpiryTool -->|actual records or explicit empty/clarification/error| ToolHR
     LocalSeed[Local-profile synthetic company and memberships]
     LocalSeed -->|one-time Flyway seed; retained in volume| DB
     LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin user ID]
@@ -324,3 +331,27 @@ Local Swagger: log in as `olarize-demo-admin`, use company `c0000000-0000-4000-8
 Verification: full backend checks pass, including domain/service unit tests, company isolation and revoked-access HTTP checks, outage errors, persistent local seed checks and generated Swagger examples. Database errors remain errors; genuine no-match queries may be empty. Contract expiry does not decide employment status.
 
 Review correction: pagination that exceeds JPA's integer row-offset limit now returns 400. Domain boundary and authenticated HTTP checks cover the limit.
+
+## Contract expiry tool backend — OLARIZE-5 / EMP-006
+
+The user authorized the backend slice with a local synthetic provider. Conversation UI and live model integration remain pending.
+
+```mermaid
+flowchart TD
+    Start[Create conversation] --> Owner[Current user and company own metadata]
+    Ask[Supported expiry question] --> Check[Recheck permission, ownership and expiry]
+    Owner --> Check
+    Check --> Plan[Bounded intent planning; no database connection held]
+    Plan --> Clarify[Ambiguous wording: clarify without query]
+    Plan --> Failure[Unavailable: problem plus structured API fallback]
+    Plan --> Arguments[Allowlisted tool and validated date arguments]
+    Arguments --> Clock[Resolve next month in Africa/Casablanca]
+    Clock --> Again[Recheck owner and current access]
+    Again --> Service[Existing listExpiringContracts service]
+    Service --> DB[(Scoped PostgreSQL current contract versions)]
+    DB --> Result[Actual records or explicit empty result]
+```
+
+Swagger: POST `/companies/{companyId}/assistant/conversations`, copy its real conversationId, then POST `/{conversationId}/contract-expiry-requests` with question `Which contracts expire in October 2026?`. Use `olarize-demo-admin` and company `c0000000-0000-4000-8000-000000000001`. Persistent local V907 gives Yasmine a synthetic contract ending 2026-10-15. No startup conversation is shared between users. See [assistant expiry guide](assistant-contract-expiry.md) for multilingual examples, limits and fallback.
+
+Verification: full backend checks passed 117 tests; the subsequent direct ownership/RLS regression passed 32 focused tests. Independent review found no actionable issues. These are deterministic provider evaluations; frontend, live browser login, general language understanding and live-provider acceptance remain separate.

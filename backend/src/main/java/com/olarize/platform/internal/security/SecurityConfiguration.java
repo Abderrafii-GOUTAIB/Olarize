@@ -46,7 +46,9 @@ class SecurityConfiguration {
                 .requestMatchers(HttpMethod.GET, "/api/v1/companies/*/memberships").hasAuthority("SCOPE_profile.read")
                 .requestMatchers(HttpMethod.GET, "/api/v1/companies/*/employees", "/api/v1/companies/*/employees/*").hasAuthority("SCOPE_profile.read")
                 .requestMatchers(HttpMethod.GET, "/api/v1/companies/*/contracts/expiring").hasAuthority("SCOPE_profile.read")
-                .requestMatchers(HttpMethod.POST, "/api/v1/companies/*/membership-change-previews",
+                .requestMatchers(HttpMethod.POST, "/api/v1/companies/*/assistant/conversations",
+                        "/api/v1/companies/*/assistant/conversations/*/contract-expiry-requests",
+                        "/api/v1/companies/*/membership-change-previews",
                         "/api/v1/companies/*/membership-changes/confirm",
                         "/api/v1/companies/*/employees",
                         "/api/v1/companies/*/employees/*/episodes/*/contracts",

@@ -1,0 +1,35 @@
+path: /api/v1/companies/{companyId}/assistant/conversations
+post:
+  operationId: startExpiryConversation
+  summary: Start an owned expiry conversation
+  description: Creates metadata owned by the authenticated user in the selected company. Requires current contract.read and profile.read. Expires after 24 hours and stores no questions, transcript or HR results. Each request creates a fresh conversation ID; copy it into the next endpoint. No employment facts are changed.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {$ref: '#/components/parameters/CompanyId'}
+  responses:
+    '201':
+      description: Owned conversation ID and expiry.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ConversationResponseDto'}
+    '400':
+      description: Invalid company ID.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '401':
+      description: Missing or invalid Keycloak access token.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '403':
+      description: Current contract.read required in selected company.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '500':
+      description: Conversation storage unavailable; sanitized problem includes requestId.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
