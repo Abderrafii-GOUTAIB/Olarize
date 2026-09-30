@@ -4,6 +4,7 @@ import com.olarize.identity.application.port.in.CompanyAccessUseCase;
 import com.olarize.identity.application.port.in.CompanyContext;
 import com.olarize.identity.application.port.out.AuthenticatedSubjectPort;
 import com.olarize.identity.application.port.out.MembershipReaderPort;
+import com.olarize.identity.domain.exception.CompanyAccessDenied;
 import com.olarize.identity.domain.model.Membership;
 import com.olarize.organization.application.port.in.CompanyLookupPort;
 import com.olarize.organization.application.port.in.CompanyReadAuthorizationPort;
@@ -28,6 +29,16 @@ public class CurrentCompanyAccessService implements CompanyAccessUseCase, Compan
     }
     @Override public CompanyContext resolve(UUID requestedCompany) {
         return context(Membership.select(memberships.activeFor(subject.require()), requestedCompany));
+    }
+    @Override public String currentUserId() { return subject.require(); }
+    @Override public CompanyContext require(UUID requestedCompany, String permission) {
+        try {
+            CompanyContext selected = resolve(requestedCompany);
+            if (selected.permits(permission)) return selected;
+        } catch (CompanyAccessDenied denied) {
+            // Preserve the same externally visible authorization outcome.
+        }
+        throw new org.springframework.security.access.AccessDeniedException("Company permission denied");
     }
     @Override public Optional<String> verifiedSubjectFor(UUID companyId) {
         if (companyId == null) return Optional.empty();

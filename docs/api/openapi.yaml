@@ -210,6 +210,46 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/employees:
+    post:
+      operationId: createEmployee
+      summary: Create a minimum employee record
+      description: After HR reviews the supplied facts and sets confirm=true, creates a company-scoped employee, first employment episode and atomic audit. Requires profile.read and a current employee.write membership in the selected company. The URL company ID selects scope and never grants access. An exact same-key retry returns the original IDs. This does not create a login, contract, payroll entitlement or legal hiring decision.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateEmployeeRequest'}
+      responses:
+        '201':
+          description: Employee, first episode and audit committed; identical retry returns the same result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreatedEmployee'}
+        '400':
+          description: Required field missing, invalid date, unknown/oversized field, or confirm is not true.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: Current employee.write membership in the selected company is required.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: Reference already exists in this company or the retry key was used with different facts.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
 components:
   parameters:
     CompanyId:
@@ -228,6 +268,54 @@ components:
           scopes:
             profile.read: Read the authenticated subject
   schemas:
+    CreateEmployeeRequest:
+      type: object
+      required: [reference, name, startDate, idempotencyKey, confirm]
+      additionalProperties: false
+      example:
+        reference: EMP-0007
+        name: Salma El Idrissi
+        startDate: '2026-10-05'
+        jobTitle: People Operations Specialist
+        department: People Operations
+        site: Casablanca
+        workEmail: salma@demo.olarize.invalid
+        workPhone: '+212 5 22 00 00 00'
+        idempotencyKey: dcb466cc-22bb-4a6e-90c1-5e3ff5743480
+        confirm: true
+      properties:
+        reference: {type: string, minLength: 1, maxLength: 64, description: Company-unique reference; leading zeroes retained and surrounding whitespace trimmed.}
+        name: {type: string, minLength: 1, maxLength: 200, description: Supplied Unicode legal or display name.}
+        startDate: {type: string, format: date, description: First employed civil day.}
+        jobTitle: {type: string, maxLength: 200}
+        department: {type: string, maxLength: 200}
+        site: {type: string, maxLength: 200}
+        workEmail: {type: string, format: email, maxLength: 254}
+        workPhone: {type: string, maxLength: 32}
+        idempotencyKey: {type: string, format: uuid, description: New UUID for a new creation; reuse only for an exact retry.}
+        confirm: {type: boolean, enum: [true], description: HR has reviewed and confirmed these exact facts.}
+    CreatedEmployee:
+      type: object
+      required: [employeeId, episodeId, companyId, reference, name, startDate, status, version]
+      additionalProperties: false
+      example:
+        employeeId: c0000000-0000-4000-8000-000000000070
+        episodeId: c0000000-0000-4000-8000-000000000071
+        companyId: c0000000-0000-4000-8000-000000000001
+        reference: EMP-0007
+        name: Salma El Idrissi
+        startDate: '2026-10-05'
+        status: UPCOMING
+        version: 1
+      properties:
+        employeeId: {type: string, format: uuid}
+        episodeId: {type: string, format: uuid}
+        companyId: {type: string, format: uuid}
+        reference: {type: string}
+        name: {type: string}
+        startDate: {type: string, format: date}
+        status: {type: string, enum: [UPCOMING, CURRENT], description: Derived from startDate and Africa/Casablanca today; not payroll eligibility.}
+        version: {type: integer, format: int64, minimum: 1}
     CompanyContext:
       type: object
       example:

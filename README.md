@@ -1,6 +1,6 @@
 # Olarize
 
-AI-native HR for Moroccan private companies with approximately 20-200 employees. This repository currently contains the Spring Boot and Docker foundation. Keycloak authentication and GET /api/v1/identity are implemented. ORG-001 company provisioning is available through a restricted administrative command; see [company provisioning](docs/company-provisioning.md). EMP-001 provides backend membership listing and trusted company-context APIs; no membership UI is implemented. Employee workflows, frontend and AI integrations are not implemented yet.
+AI-native HR for Moroccan private companies with approximately 20-200 employees. This repository contains the Spring Boot and Docker foundation plus backend slices for company setup, memberships and minimum employee creation. Keycloak authentication and GET /api/v1/identity are implemented. ORG-001 company provisioning is available through a restricted administrative command; see [company provisioning](docs/company-provisioning.md). EMP-001 provides membership listing and trusted company context; EMP-002 provides confirmed, company-scoped employee creation. Directory views, structured employee forms, other HR workflows, frontend and AI integrations remain planned.
 
 ## Stack
 
@@ -29,6 +29,10 @@ olarize/                             Existing folder may still be named hr ai sy
       identity/
         package-info.java            Identity module boundary
         adapter/in/web/               HTTP controllers and API documentation
+      employment/
+        domain/                       Minimum employee facts and status
+        application/                  Create use case, permission and transaction
+        adapter/                      DTOs, JPA entities, repositories and mappers
     src/main/resources/
       application.yml                Safe common configuration
       application-local.yml          Explicit local migration behavior

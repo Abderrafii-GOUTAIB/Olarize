@@ -1,6 +1,6 @@
 # Olarize local backend
 
-Scope: backend and Docker foundation with ORG-001 company provisioning, EMP-001 active membership/company-context APIs, IAM-001 company-scoped membership administration and IAM-002 PostgreSQL isolation for current organization/identity tables. Keycloak and GET /api/v1/identity are implemented; frontend, employee records and AI integrations are not implemented. Java 21 and Docker Compose are required; Maven downloads through the committed official wrapper. No AWS credentials are required.
+Scope: backend and Docker foundation with ORG-001 company provisioning, EMP-001 active membership/company-context APIs, IAM-001 company-scoped membership administration, IAM-002 PostgreSQL isolation, and EMP-002 confirmed minimum employee creation. Keycloak and GET /api/v1/identity are implemented. Employee directory views, structured forms, other HR features, frontend and AI integrations are not implemented yet. Java 21 and Docker Compose are required; Maven downloads through the committed official wrapper. No AWS credentials are required.
 
 For a visual map of implemented features, current request flows and manual verification steps, see [features and flows](features-and-flows.md).
 
@@ -67,6 +67,8 @@ The import uses Spring Boot's native properties format, not a full dotenv parser
 See authentication.md for local Keycloak, required additional .env passwords and the first endpoint.
 
 ## Swagger and logs
+
+EMP-002 adds a confirmed HR employee-creation POST in local Swagger. The local `V902` migration persists a synthetic employee, and `V903` gives `olarize-demo-admin` an explicit `employee.write` permission for Swagger checks. Set the synthetic user's password as described in [employee creation](employment-creation.md). That page gives the exact company ID, request and expected response. The directory read endpoint and accessible form remain separate stories.
 
 Swagger UI is enabled in the local profile at http://localhost:8080/swagger-ui/index.html; generated OpenAPI is at http://localhost:8080/v3/api-docs. The Authorize action uses Keycloak authorization code + PKCE and requests profile.read. The local profile applies `db/local` Flyway seeds once; demo company and membership rows persist in the PostgreSQL volume. The web datasource connects as restricted `olarize_runtime`; Flyway uses the local bootstrap account separately. To see nonempty membership responses, set up the synthetic `olarize-demo-admin` account using [local authentication](authentication.md), then call `GET /api/v1/identity/memberships`, `GET /api/v1/identity/company-context`, and `GET /api/v1/companies/{companyId}/memberships` using the returned company ID. The Keycloak bootstrap administrator is not an Olarize user. The Swagger redirect is an exact allowed URI for the local client. Nonlocal profiles disable both routes and security denies access. The checked-in docs/api/openapi.yaml is a reference contract; the generated OpenAPI reflects the running controllers.
 

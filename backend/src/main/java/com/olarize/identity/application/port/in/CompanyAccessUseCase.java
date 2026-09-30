@@ -7,4 +7,6 @@ import java.util.UUID;
 public interface CompanyAccessUseCase {
     List<CompanyContext> memberships();
     CompanyContext resolve(UUID requestedCompany);
+    String currentUserId();
+    CompanyContext require(UUID requestedCompany, String permission);
 }

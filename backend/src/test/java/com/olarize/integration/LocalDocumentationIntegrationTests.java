@@ -107,6 +107,14 @@ class LocalDocumentationIntegrationTests {
         var companyMemberships = paths.path("/api/v1/companies/{companyId}/memberships").path("get");
         var preview = paths.path("/api/v1/companies/{companyId}/membership-change-previews").path("post");
         var confirm = paths.path("/api/v1/companies/{companyId}/membership-changes/confirm").path("post");
+        var createEmployee = paths.path("/api/v1/companies/{companyId}/employees").path("post");
+        assertThat(createEmployee.path("description").asText()).contains("employee.write", "first episode");
+        assertThat(createEmployee.path("security").get(0).path("keycloak").get(0).asText())
+                .isEqualTo("profile.read");
+        assertThat(schemas.path("CreateEmployeeRequest").path("example").path("reference").asText())
+                .isEqualTo("EMP-0007");
+        assertThat(schemas.path("CreatedEmployeeResponse").path("example").path("status").asText())
+                .isEqualTo("UPCOMING");
         for (var securedOperation : java.util.List.of(companyMemberships, preview, confirm)) {
             assertThat(securedOperation.path("security").get(0).path("keycloak").get(0).asText())
                     .isEqualTo("profile.read");

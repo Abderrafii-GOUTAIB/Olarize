@@ -62,7 +62,7 @@ PostgreSQL stores authoritative business data; pgvector will store authorized po
 - assistant: bounded orchestration and exact confirmed tool proposals.
 - notifications and audit: durable delivery and traceable business changes.
 
-Except for identity authentication, trusted company memberships and organization provisioning, these business capabilities remain planned. Domain purity checks cover the organization registration rules.
+EMP-002 now implements minimum employee creation in the employment module. Its domain model normalizes the supplied facts; `CreateEmployeeService` checks the current company HR permission and owns the transaction; web DTOs and a mapper keep HTTP input/output separate; JPA entities/repositories persist employee, first episode, retry receipt and audit. A focused PostgreSQL advisory transaction lock serializes an actor's idempotency key before JPA reads or writes. The new tables force company RLS using the signed transaction scope. Directory/detail, corrections, contract facts, the accessible form and other business capabilities remain planned. Domain purity checks cover the organization and employment rules.
 
 ## Accepted MVP data and hosting direction
 

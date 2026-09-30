@@ -134,6 +134,8 @@ class CompanyContextIntegrationTests {
         owner.execute("alter table identity_membership_audit owner to membership_migrator");
         owner.execute("alter function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) owner to membership_migrator");
         owner.execute("grant select on identity_membership to membership_runtime");
+        owner.execute("grant select, insert on employment_employee, employment_episode, employment_creation_audit, employment_creation_request to membership_runtime");
+        owner.execute("grant execute on function public.olarize_can_write_employee(uuid) to membership_runtime");
         owner.execute("grant execute on function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
         owner.execute("grant select on organization_company to olarize_identity_provisioner_owner");
         owner.execute("grant select, insert, update on identity_membership to olarize_identity_provisioner_owner");
@@ -318,6 +320,143 @@ class CompanyContextIntegrationTests {
                 .header("Authorization", "Bearer " + token).header("X-Request-ID", "membership-admin-test")
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test void hrCreatesMinimumEmployeeAndExactRetryReturnsOneAuditedRecord() throws Exception {
+        UUID companyId = company();
+        String hr = subject();
+        membership(hr, companyId, "ACTIVE", "employee.write");
+        String path = "/api/v1/companies/" + companyId + "/employees";
+        String body = employeeRequest("EMP-0007", UUID.randomUUID(), "2026-10-05");
+
+        var first = authenticatedPost(path, token(hr), body);
+        assertThat(first.statusCode()).as(first.body()).isEqualTo(201);
+        var created = json(first.body());
+        assertThat(created.get("reference").asText()).isEqualTo("EMP-0007");
+        assertThat(created.get("status").asText()).isEqualTo("UPCOMING");
+        assertThat(created.get("version").asLong()).isEqualTo(1);
+        assertThat(authenticatedPost(path, token(hr), body).body()).isEqualTo(first.body());
+        assertThat(authenticatedPost(path, token(hr), body.replace("EMP-0007", "EMP-0009")).statusCode()).isEqualTo(409);
+        UUID ambiguousKey = UUID.randomUUID();
+        String firstText = employeeRequest("EMP-HASH", ambiguousKey, "2026-09-01")
+                .replace("\"jobTitle\":\"People Operations Specialist\",\"department\":\"People Operations\"",
+                        "\"jobTitle\":\"People\\nOperations\",\"department\":\"HR\"");
+        String changedText = employeeRequest("EMP-HASH", ambiguousKey, "2026-09-01")
+                .replace("\"jobTitle\":\"People Operations Specialist\",\"department\":\"People Operations\"",
+                        "\"jobTitle\":\"People\",\"department\":\"Operations\\nHR\"");
+        assertThat(authenticatedPost(path, token(hr), firstText).statusCode()).isEqualTo(201);
+        assertThat(authenticatedPost(path, token(hr), changedText).statusCode()).isEqualTo(409);
+        assertThat(owner.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select count(*) from employment_episode where company_id = ?", Integer.class, companyId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select count(*) from employment_creation_audit where company_id = ?", Integer.class, companyId)).isEqualTo(2);
+    }
+
+    @Test void employeeAuditFailureRollsBackRecordAndUnscopedRuntimeCannotReadIt() throws Exception {
+        UUID companyId = company();
+        String hr = subject();
+        membership(hr, companyId, "ACTIVE", "employee.write");
+        String path = "/api/v1/companies/" + companyId + "/employees";
+        String body = employeeRequest("EMP-ROLLBACK", UUID.randomUUID(), "2026-09-01");
+        owner.execute("""
+                create function reject_employee_audit() returns trigger language plpgsql as $$
+                begin raise exception 'synthetic audit outage'; end; $$
+                """);
+        owner.execute("create trigger reject_employee_audit before insert on employment_creation_audit for each row execute function reject_employee_audit()");
+        try {
+            assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(500);
+        } finally {
+            owner.execute("drop trigger reject_employee_audit on employment_creation_audit");
+            owner.execute("drop function reject_employee_audit()");
+        }
+        assertThat(owner.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isZero();
+        assertThat(owner.queryForObject("select count(*) from employment_creation_request where company_id = ?", Integer.class, companyId)).isZero();
+        assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(201);
+        assertThat(jdbc.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isZero();
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        transaction.execute(status -> {
+            scope.apply(jdbc, hr, companyId);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isEqualTo(1);
+            return null;
+        });
+        assertThat(jdbc.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isZero();
+    }
+
+    @Test void employeeCreationRejectsInvalidPermissionScopeAndConflictingReference() throws Exception {
+        UUID companyA = company(); UUID companyB = company();
+        String hrA = subject(); String hrB = subject(); String ordinary = subject();
+        membership(hrA, companyA, "ACTIVE", "employee.write");
+        membership(hrB, companyB, "ACTIVE", "employee.write");
+        membership(ordinary, companyA, "ACTIVE", "employee.self.read");
+        String pathA = "/api/v1/companies/" + companyA + "/employees";
+        String pathB = "/api/v1/companies/" + companyB + "/employees";
+        String first = employeeRequest("EMP-0008", UUID.randomUUID(), "2026-09-01");
+
+        assertThat(authenticatedPost(pathA, token(ordinary), first).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(pathB, token(hrA), first).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(pathA, token(hrA), first.replace("\"confirm\":true", "\"confirm\":false")).statusCode()).isEqualTo(400);
+        assertThat(authenticatedPost(pathA, token(hrA), first.replace("\"name\":\"Salma El Idrissi\"", "\"name\":\" \"")).statusCode()).isEqualTo(400);
+        assertThat(authenticatedPost(pathA, token(hrA), first.replace("\"confirm\":true", "\"confirm\":true,\"companyId\":\"" + companyB + "\"")).statusCode()).isEqualTo(400);
+        var invalidDate = authenticatedPost(pathA, token(hrA), first.replace("2026-09-01", "not-a-date"));
+        assertThat(invalidDate.statusCode()).isEqualTo(400);
+        assertThat(json(invalidDate.body()).path("errors").get(0).path("field").asText()).isEqualTo("startDate");
+        assertThat(json(invalidDate.body()).path("errors").get(0).path("code").asText()).isEqualTo("Invalid");
+        assertThat(invalidDate.body()).doesNotContain("not-a-date");
+        var unknownField = authenticatedPost(pathA, token(hrA), first.replace("\"confirm\":true", "\"confirm\":true,\"privateNote\":\"private-data\""));
+        assertThat(unknownField.statusCode()).isEqualTo(400);
+        assertThat(json(unknownField.body()).path("errors").get(0).path("field").asText()).isEqualTo("privateNote");
+        assertThat(unknownField.body()).doesNotContain("private-data");
+        assertThat(authenticatedPost(pathA, token(hrA), first).statusCode()).isEqualTo(201);
+        assertThat(authenticatedPost(pathA, token(hrA), employeeRequest("emp-0008", UUID.randomUUID(), "2026-09-01")).statusCode()).isEqualTo(409);
+        assertThat(authenticatedPost(pathB, token(hrB), employeeRequest("EMP-0008", UUID.randomUUID(), "2026-09-01")).statusCode()).isEqualTo(201);
+        assertThat(owner.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyA)).isEqualTo(1);
+    }
+
+    @Test void concurrentCreatesSerializeSameRetriesAndCompanyReferences() throws Exception {
+        UUID companyId = company();
+        String hr = subject();
+        membership(hr, companyId, "ACTIVE", "employee.write");
+        String path = "/api/v1/companies/" + companyId + "/employees";
+        String bearer = token(hr);
+
+        String retry = employeeRequest("EMP-SAME-KEY", UUID.randomUUID(), "2026-09-01");
+        // Use the same key and exact payload for both simultaneous submissions.
+        var retryBody = json(retry);
+        String retryPayload = employeeRequest("EMP-SAME-KEY",
+                UUID.fromString(retryBody.path("idempotencyKey").asText()), "2026-09-01");
+        var retryResponses = concurrentPosts(path, bearer, retryPayload, retryPayload);
+        assertThat(retryResponses).extracting(HttpResponse::statusCode).containsExactly(201, 201);
+        assertThat(retryResponses.get(0).body()).isEqualTo(retryResponses.get(1).body());
+        assertThat(owner.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isEqualTo(1);
+        assertThat(owner.queryForObject("select count(*) from employment_creation_audit where company_id = ?", Integer.class, companyId)).isEqualTo(1);
+
+        String duplicateA = employeeRequest("EMP-RACE", UUID.randomUUID(), "2026-09-01");
+        String duplicateB = employeeRequest("emp-race", UUID.randomUUID(), "2026-09-01");
+        var duplicateResponses = concurrentPosts(path, bearer, duplicateA, duplicateB);
+        assertThat(duplicateResponses).extracting(HttpResponse::statusCode).containsExactlyInAnyOrder(201, 409);
+        assertThat(owner.queryForObject("select count(*) from employment_employee where company_id = ?", Integer.class, companyId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select count(*) from employment_episode where company_id = ?", Integer.class, companyId)).isEqualTo(2);
+        assertThat(owner.queryForObject("select count(*) from employment_creation_audit where company_id = ?", Integer.class, companyId)).isEqualTo(2);
+    }
+
+    private List<HttpResponse<String>> concurrentPosts(String path, String bearer, String first, String second)
+            throws Exception {
+        var headers = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", "Bearer " + bearer).header("Content-Type", "application/json");
+        var firstRequest = headers.copy().POST(HttpRequest.BodyPublishers.ofString(first)).build();
+        var secondRequest = headers.copy().POST(HttpRequest.BodyPublishers.ofString(second)).build();
+        var firstResponse = client.sendAsync(firstRequest, HttpResponse.BodyHandlers.ofString());
+        var secondResponse = client.sendAsync(secondRequest, HttpResponse.BodyHandlers.ofString());
+        return List.of(firstResponse.get(), secondResponse.get());
+    }
+
+    private String employeeRequest(String reference, UUID key, String startDate) {
+        return """
+            {"reference":"%s","name":"Salma El Idrissi","startDate":"%s",
+             "jobTitle":"People Operations Specialist","department":"People Operations",
+             "site":"Casablanca","workEmail":"salma@demo.olarize.invalid",
+             "idempotencyKey":"%s","confirm":true}
+            """.formatted(reference, startDate, key);
     }
 
 

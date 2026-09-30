@@ -33,7 +33,9 @@ class ApiExceptionHandlerTests {
     }
     @Test void malformedJsonAndParameterErrorsAreBadRequests() throws Exception {
         mvc.perform(post("/test").contentType(MediaType.APPLICATION_JSON).content("{bad-json"))
-            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("HTTP_400"));
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("HTTP_400"))
+            .andExpect(jsonPath("$.errors[0].field").value("request"))
+            .andExpect(jsonPath("$.errors[0].code").value("Invalid"));
         mvc.perform(get("/test/number").param("value", "private-salary"))
             .andExpect(status().isBadRequest()).andExpect(content().string(not(containsString("private-salary"))));
     }
