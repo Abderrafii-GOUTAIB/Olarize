@@ -6,6 +6,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.ActiveProfiles;
@@ -46,6 +48,9 @@ class LocalDocumentationIntegrationTests {
 
     @LocalServerPort int port;
     @Autowired ObjectMapper mapper;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired com.olarize.platform.api.DatabaseScopeSigner scope;
+    @Autowired PlatformTransactionManager transactions;
     private final HttpClient client = HttpClient.newHttpClient();
 
     private HttpResponse<String> get(String path) throws Exception {
@@ -115,6 +120,23 @@ class LocalDocumentationIntegrationTests {
                 .isEqualTo("EMP-0007");
         assertThat(schemas.path("CreatedEmployeeResponse").path("example").path("status").asText())
                 .isEqualTo("UPCOMING");
+        String createContractPath = "/api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/contracts";
+        String correctContractPath = createContractPath + "/{contractId}/corrections";
+        var createContract = paths.path(createContractPath).path("post");
+        var correctContract = paths.path(correctContractPath).path("post");
+        assertThat(createContract.path("summary").asText()).contains("Record contract facts");
+        assertThat(createContract.path("description").asText()).contains("contract.write", "UNREVIEWED", "NOT_RECORDED");
+        assertThat(correctContract.path("description").asText())
+                .contains("expectedVersion", "stale", "originally created");
+        assertThat(createContract.path("security").get(0).path("keycloak").get(0).asText()).isEqualTo("profile.read");
+        assertThat(correctContract.path("security").get(0).path("keycloak").get(0).asText()).isEqualTo("profile.read");
+        assertThat(schemas.path("CreateContractRequest").path("example").path("typeCode").asText()).isEqualTo("CDD");
+        assertThat(schemas.path("CorrectContractRequest").path("example").path("expectedVersion").asInt()).isEqualTo(1);
+        assertThat(createContract.path("responses").path("201").path("content")
+                .path("application/json").path("schema").path("example").path("reviewState").asText())
+                .isEqualTo("UNREVIEWED");
+        assertThat(createContract.path("responses").path("404").path("description").asText()).contains("episode");
+        assertThat(correctContract.path("responses").path("409").path("description").asText()).contains("Stale");
         for (var securedOperation : java.util.List.of(companyMemberships, preview, confirm)) {
             assertThat(securedOperation.path("security").get(0).path("keycloak").get(0).asText())
                     .isEqualTo("profile.read");
@@ -128,5 +150,16 @@ class LocalDocumentationIntegrationTests {
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).contains("Swagger UI");
         assertThat(get("/api/v1/identity").statusCode()).isEqualTo(401);
+    }
+
+    @Test void localContractDemoRemainsVisibleOnlyToTheSeededHrMembership() {
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        Integer contracts = transaction.execute(status -> {
+            scope.apply(jdbc, "c0000000-0000-4000-8000-000000000011",
+                    java.util.UUID.fromString("c0000000-0000-4000-8000-000000000001"));
+            return jdbc.queryForObject("select count(*) from employment_contract where id = ?",
+                    Integer.class, java.util.UUID.fromString("c0000000-0000-4000-8000-000000000073"));
+        });
+        assertThat(contracts).isEqualTo(1);
     }
 }

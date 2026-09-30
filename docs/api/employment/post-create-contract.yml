@@ -1,0 +1,55 @@
+path: /api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/contracts
+post:
+  operationId: createEmploymentContractFacts
+  summary: Record contract facts for an employment episode
+  description: Store the type, dates, and source reference supplied by HR for a specific employment episode. Every new version is unreviewed. This operation does not assess legal validity, change employment status, create an account, or upload a document. An omitted end date is recorded as not supplied.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {$ref: '#/components/parameters/CompanyId'}
+    - name: employeeId
+      in: path
+      required: true
+      description: Employee ID returned by employee creation or an authorized employee lookup.
+      schema: {type: string, format: uuid}
+    - name: episodeId
+      in: path
+      required: true
+      description: Employment period ID returned with the employee record.
+      schema: {type: string, format: uuid}
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema: {$ref: '#/components/schemas/CreateContractRequest'}
+  responses:
+    '201':
+      description: Contract facts, version 1, and audit evidence were committed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ContractResponse'}
+    '400':
+      description: Invalid date interval, invalid type code, unsupported or oversized field, or confirm is not true.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '401':
+      description: Missing or invalid Keycloak access token.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '403':
+      description: Current contract.write membership in the selected company is required.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '404':
+      description: Employee or episode is unavailable in this company.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '409':
+      description: The idempotency key was previously used with different facts.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

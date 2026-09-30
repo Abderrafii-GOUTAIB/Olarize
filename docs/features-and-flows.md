@@ -23,6 +23,9 @@ flowchart TD
     HR[HR member with employee.write]
     CreateEmployee[POST /companies/{companyId}/employees]
     EmployeeRecord[Employee + first episode + audit]
+    ContractHR[HR member with contract.write]
+    ContractAPI[POST contract facts · POST correction]
+    ContractVersions[Contract + retained facts versions + audit]
 
     User --> Keycloak
     Keycloak -->|Bearer token| API
@@ -49,6 +52,10 @@ flowchart TD
     CreateEmployee -->|current company membership + signed scope| DB
     CreateEmployee -->|one transaction| EmployeeRecord
     EmployeeRecord --> DB
+    ContractHR -->|confirmed supplied facts + retry UUID| ContractAPI
+    ContractAPI -->|current contract permission + signed scope| DB
+    ContractAPI -->|append version, audit and receipt atomically| ContractVersions
+    ContractVersions --> DB
     LocalSeed[Local-profile synthetic company and memberships]
     LocalSeed -->|one-time Flyway seed; retained in volume| DB
     LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin user ID]
@@ -85,6 +92,36 @@ sequenceDiagram
 ```
 
 This API records factual minimum employment data. The accessible creation form awaits UI-DEP; no product frontend exists yet. An HR user can test the backend with local Swagger as described in [employee creation](employment-creation.md).
+
+## Contract facts and correction flow (EMP-004 backend)
+
+```mermaid
+sequenceDiagram
+    actor HR
+    participant API as Contract facts API
+    participant Identity as Current company membership
+    participant Service as Contract facts service
+    participant DB as PostgreSQL with RLS
+    HR->>API: POST contract facts (episode IDs, supplied type/dates/source, confirm, retry UUID)
+    API->>Service: Validate type/date facts
+    Service->>Identity: Require current contract.write in selected company
+    Identity-->>Service: Verified actor and company
+    Service->>DB: Set signed company scope and serialize retry key
+    alt Exact retry
+        DB-->>Service: Original saved facts version
+    else New record
+        Service->>DB: Insert contract, version 1, audit and receipt atomically
+        DB-->>Service: Contract ID and version 1
+    end
+    Service-->>API: UNREVIEWED facts and date completeness
+    API-->>HR: 201 created contract version
+    HR->>API: POST corrections (expectedVersion, reason, evidence, confirm)
+    API->>Service: Validate exact corrected facts
+    Service->>DB: Compare version and append next version + audit
+    DB-->>HR: 200 new version, or 409 if the version is stale
+```
+
+Contract type codes are recorded as supplied labels, and every version remains `UNREVIEWED`. The API does not assess legality, renewal, payroll eligibility, or employment/account state. A missing end date is `NOT_RECORDED`; no expiry is guessed. These endpoints have individual contracts in [`docs/api/employment/`](api/employment/) and Swagger examples use the persistent synthetic contract in [contract facts](employment-contract-facts.md). The accessible form and document upload remain separate work.
 
 ## Company membership administration flow (IAM-001)
 
@@ -169,6 +206,7 @@ The API derives identity from the verified token. A requested company ID selects
 | IAM-001 company membership administration | Implemented locally; production identity-admin authority remains gated by OD-03 | `./scripts/verify-backend.sh` exercises list, grant, role change, reactivation, revocation, provider failures, audit rollback, retries, concurrency and next-request permissions with PostgreSQL Testcontainers and synthetic signed tokens. Generated Swagger declares `profile.read` on the company membership list, preview and confirmation operations so it sends the authorized access token. The persistence classes use searchable `JdbcRepository` names and `MembershipJdbcMapper` handles SQL rows. | Sign into local Swagger as `olarize-demo-admin`. Use the company ID returned by `GET /api/v1/identity/memberships` to list that company's memberships, then copy the chosen row's `userId` into the preview request. The seeded ordinary member supports a role-change preview. New grants and reactivations need the local Keycloak admin service account described in [membership administration](membership-administration.md). This synthetic local identity-admin record is not production authority. |
 | IAM-002 PostgreSQL company isolation | Implemented for current organization and identity tables using a signed database scope | `./scripts/verify-backend.sh` runs restricted-runtime PostgreSQL tests for missing/forged scope, administrator impersonation, cross-company reads, joins, aggregates, revocation, audit references, transaction cleanup and role privileges. | In local Swagger, sign in as `olarize-demo-admin`; the existing membership and company-context endpoints return the seeded Demo Morocco SARL data. Sign in as a user without that company membership to check access denial. IAM-002 adds no new HTTP endpoint; see [company isolation](company-isolation.md). |
 | EMP-002 minimum employee creation | Backend API implemented; accessible form awaits UI-DEP | `./scripts/verify-backend.sh` covers confirmed creation, same-key retry, duplicate company reference, permission/scope denial, audit rollback and restricted-runtime RLS. | Sign into local Swagger as `olarize-demo-admin`, choose the seeded company, and POST a new reference such as `EMP-0007`; see [employee creation](employment-creation.md). |
+| EMP-004 contract facts | Backend create/correction APIs implemented; accessible review form and document storage remain separate | `./scripts/verify-backend.sh` covers date and type validation, company permission/RLS, version history, exact retries, stale/concurrent corrections and atomic audit rollback. | Sign into local Swagger as `olarize-demo-admin`. Use the seeded company, employee, episode and contract IDs; see [contract facts](employment-contract-facts.md). |
 | Employee directory, leave, attendance, payroll, documents, product AI and frontend | Not implemented | No feature test exists yet | Track these in the requirements and task files; do not treat a planned flow as usable functionality. |
 
 The local Swagger integration check starts a disposable PostgreSQL container for both the API datasource and Flyway migrations. CI does not need the developer's database on `localhost:5433`; a missing local database no longer prevents the Swagger contract tests from starting.
@@ -181,7 +219,7 @@ From the repository root, with Docker available:
 ./scripts/verify-backend.sh
 ```
 
-This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current EMP-002 evidence is in [task 008](../.instructions/tasks/008-minimum-employee-record.md); IAM-002 evidence is in [task 007](../.instructions/tasks/007-postgresql-company-isolation.md). The command reruns checks against your current checkout.
+This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current EMP-004 evidence is in [task 009](../.instructions/tasks/009-contract-facts.md); EMP-002 evidence is in [task 008](../.instructions/tasks/008-minimum-employee-record.md). The command reruns checks against your current checkout.
 
 For hands-on API checks:
 

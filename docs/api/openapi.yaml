@@ -250,6 +250,101 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/contracts:
+    post:
+      operationId: createEmploymentContractFacts
+      summary: Record contract facts for an employment episode
+      description: Stores HR-supplied contract type, dates and source reference for the selected company, employee and episode. Requires profile.read plus current contract.write membership. Every saved version is UNREVIEWED; no legal validity, renewal, eligibility or employment-state decision is made. A missing end date is explicitly NOT_RECORDED. Exact same-key retries return the version originally created.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+        - {$ref: '#/components/parameters/EmployeeId'}
+        - {$ref: '#/components/parameters/EpisodeId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateContractRequest'}
+      responses:
+        '201':
+          description: Contract facts, version 1 and audit evidence were committed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContractResponse'}
+        '400':
+          description: Invalid dates, type code, unsupported field or missing confirmation.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: Current contract.write membership in the selected company is required.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '404':
+          description: Employee or episode is unavailable in this company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: The idempotency key was reused with different facts.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/contracts/{contractId}/corrections:
+    post:
+      operationId: correctEmploymentContractFacts
+      summary: Correct contract facts and preserve the prior version
+      description: Appends corrected facts using the current expectedVersion, a reason and evidence reference. Requires profile.read plus current contract.write membership. The new version is UNREVIEWED; stale versions conflict. This does not assess legal validity or alter employment, account or payroll state.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+        - {$ref: '#/components/parameters/EmployeeId'}
+        - {$ref: '#/components/parameters/EpisodeId'}
+        - {$ref: '#/components/parameters/ContractId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CorrectContractRequest'}
+      responses:
+        '200':
+          description: New contract facts version and audit evidence were committed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContractResponse'}
+        '400':
+          description: Invalid dates, type code, version, reason, evidence reference or confirmation.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: Current contract.write membership in the selected company is required.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '404':
+          description: Contract is unavailable in this company or episode.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: Expected version is stale or the idempotency key was reused with different facts.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
 components:
   parameters:
     CompanyId:
@@ -258,6 +353,24 @@ components:
       required: true
       description: Company UUID from the signed-in user's active membership context. It selects a requested scope but does not grant access.
       schema: {type: string, format: uuid, example: c0000000-0000-4000-8000-000000000001}
+    EmployeeId:
+      name: employeeId
+      in: path
+      required: true
+      description: Employee ID owned by the selected company.
+      schema: {type: string, format: uuid, example: c0000000-0000-4000-8000-000000000070}
+    EpisodeId:
+      name: episodeId
+      in: path
+      required: true
+      description: Employment episode that owns the contract facts.
+      schema: {type: string, format: uuid, example: c0000000-0000-4000-8000-000000000071}
+    ContractId:
+      name: contractId
+      in: path
+      required: true
+      description: Contract fact record to correct.
+      schema: {type: string, format: uuid, example: c0000000-0000-4000-8000-000000000073}
   securitySchemes:
     keycloak:
       type: oauth2
@@ -316,6 +429,81 @@ components:
         startDate: {type: string, format: date}
         status: {type: string, enum: [UPCOMING, CURRENT], description: Derived from startDate and Africa/Casablanca today; not payroll eligibility.}
         version: {type: integer, format: int64, minimum: 1}
+    CreateContractRequest:
+      type: object
+      required: [typeCode, startDate, sourceReference, idempotencyKey, confirm]
+      additionalProperties: false
+      example:
+        typeCode: CDD
+        startDate: '2026-09-01'
+        endDate: '2027-08-31'
+        sourceReference: Synthetic HR archive item DEMO-CONTRACT-0002
+        idempotencyKey: 108f9945-6aae-4f39-8ab5-8b11fdb99772
+        confirm: true
+      properties:
+        typeCode: {type: string, enum: [CDI, CDD, SPECIFIED_WORK, UNKNOWN], description: HR-reported code only; the service does not assess legality.}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date, nullable: true, description: Null means no end date was supplied; it does not prove an indefinite contract.}
+        sourceReference: {type: string, minLength: 1, maxLength: 200, description: HR source label/reference; no file is uploaded.}
+        idempotencyKey: {type: string, format: uuid, description: New UUID for a new contract; reuse only for an exact retry.}
+        confirm: {type: boolean, enum: [true], description: HR has confirmed these exact recorded facts.}
+    CorrectContractRequest:
+      type: object
+      required: [expectedVersion, typeCode, startDate, sourceReference, reason, evidenceReference, idempotencyKey, confirm]
+      additionalProperties: false
+      example:
+        expectedVersion: 1
+        typeCode: CDD
+        startDate: '2026-09-01'
+        endDate: '2027-12-31'
+        sourceReference: Amended synthetic paper contract
+        reason: The original end date was transcribed incorrectly.
+        evidenceReference: HR archive item DEMO-CONTRACT-AMENDMENT-0001
+        idempotencyKey: 894f5ba8-e8f9-459d-921e-51605201fb08
+        confirm: true
+      properties:
+        expectedVersion: {type: integer, format: int64, minimum: 1, description: Current version HR reviewed before correcting.}
+        typeCode: {type: string, enum: [CDI, CDD, SPECIFIED_WORK, UNKNOWN], description: HR-reported code only; the service does not assess legality.}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date, nullable: true, description: Null means no end date was supplied.}
+        sourceReference: {type: string, minLength: 1, maxLength: 200}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+        evidenceReference: {type: string, minLength: 1, maxLength: 200, description: Evidence label/reference; no file is uploaded.}
+        idempotencyKey: {type: string, format: uuid, description: New UUID for this correction; reuse only for an exact retry.}
+        confirm: {type: boolean, enum: [true]}
+    ContractResponse:
+      type: object
+      required: [contractId, companyId, employeeId, episodeId, version, typeCode, startDate, endDateCompleteness, sourceReference, reviewState, recordedAt]
+      additionalProperties: false
+      description: One immutable recorded facts version. UNREVIEWED and NOT_RECORDED describe workflow/data completeness, not legal status.
+      example:
+        contractId: c0000000-0000-4000-8000-000000000073
+        companyId: c0000000-0000-4000-8000-000000000001
+        employeeId: c0000000-0000-4000-8000-000000000070
+        episodeId: c0000000-0000-4000-8000-000000000071
+        version: 1
+        typeCode: CDD
+        startDate: '2026-09-01'
+        endDate: '2027-08-31'
+        endDateCompleteness: RECORDED
+        sourceReference: Synthetic HR archive item DEMO-CONTRACT-0001
+        reviewState: UNREVIEWED
+        recordedAt: '2026-09-30T10:00:00Z'
+      properties:
+        contractId: {type: string, format: uuid}
+        companyId: {type: string, format: uuid}
+        employeeId: {type: string, format: uuid}
+        episodeId: {type: string, format: uuid}
+        version: {type: integer, format: int64, minimum: 1}
+        typeCode: {type: string, enum: [CDI, CDD, SPECIFIED_WORK, UNKNOWN]}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date, nullable: true}
+        endDateCompleteness: {type: string, enum: [RECORDED, NOT_RECORDED], description: NOT_RECORDED means no end date was supplied.}
+        sourceReference: {type: string}
+        reviewState: {type: string, enum: [UNREVIEWED]}
+        changeReason: {type: string, nullable: true}
+        evidenceReference: {type: string, nullable: true}
+        recordedAt: {type: string, format: date-time}
     CompanyContext:
       type: object
       example:
