@@ -152,6 +152,32 @@ class LocalDocumentationIntegrationTests {
         }
     }
 
+    @Test void directorySwaggerExplainsFiltersAndPersistentDemoRecords() throws Exception {
+        var response = get("/v3/api-docs");
+        assertThat(response.statusCode()).isEqualTo(200);
+        var api = mapper.readTree(response.body());
+        var list = api.path("paths").path("/api/v1/companies/{companyId}/employees").path("get");
+        var detail = api.path("paths").path("/api/v1/companies/{companyId}/employees/{employeeId}").path("get");
+        assertThat(list.path("description").asText()).contains("employee.read", "CURRENT", "Africa/Casablanca", "duplicate names");
+        assertThat(detail.path("description").asText()).contains("scoped 404", "private contact");
+        assertThat(list.path("security").get(0).path("keycloak").get(0).asText()).isEqualTo("profile.read");
+        assertThat(detail.path("security").get(0).path("keycloak").get(0).asText()).isEqualTo("profile.read");
+        var schemas = api.path("components").path("schemas");
+        assertThat(schemas.path("EmployeeDirectoryResponseDto").path("example").path("items").get(0).path("name").asText())
+                .isEqualTo("Ahmed El Amrani");
+        assertThat(schemas.path("EmployeeDetailResponseDto").path("example").path("reference").asText()).isEqualTo("EMP-0002");
+        assertThat(schemas.path("EmployeeSummaryResponseDto").path("properties").has("workEmail")).isFalse();
+        assertThat(schemas.path("EmployeeDetailResponseDto").path("properties").has("workEmail")).isTrue();
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        transaction.executeWithoutResult(status -> {
+            scope.apply(jdbc, "c0000000-0000-4000-8000-000000000011",
+                    java.util.UUID.fromString("c0000000-0000-4000-8000-000000000001"));
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee where company_id = ?::uuid", Integer.class,
+                    "c0000000-0000-4000-8000-000000000001")).isEqualTo(5);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee where name = 'Ahmed El Amrani'", Integer.class)).isEqualTo(2);
+        });
+    }
+
     @Test void swaggerUiLoadsLocallyWithoutOpeningHrRoutes() throws Exception {
         var response = get("/swagger-ui/index.html");
         assertThat(response.statusCode()).isEqualTo(200);

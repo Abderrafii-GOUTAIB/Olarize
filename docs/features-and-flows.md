@@ -60,6 +60,12 @@ flowchart TD
     ExpiryAPI -->|current contract.read + signed scope| DB
     DB -->|current versions + missing-date count| ExpiryAPI
     ExpiryAPI -->|bounded page, stable order| ContractHR
+    DirectoryHR[HR member with employee.read]
+    DirectoryHR -->|name, reference, status and date| DirectoryAPI[GET company employees]
+    DirectoryAPI -->|signed company scope; bounded page and count| DB
+    DirectoryAPI -->|employee ID selected by HR| DetailAPI[GET company employee detail]
+    DetailAPI -->|same current permission and scope| DB
+    DB -->|minimal work facts and selected episode| DirectoryHR
     LocalSeed[Local-profile synthetic company and memberships]
     LocalSeed -->|one-time Flyway seed; retained in volume| DB
     LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin user ID]
@@ -296,3 +302,25 @@ flowchart LR
 ```
 
 The independent review documentation finding is resolved: README and the hexagonal draft now show the infrastructure layout and implemented employment module. The draft labels runtime flow separately from Java dependencies on ports.
+
+## Employee directory and detail — OLARIZE-6 / EMP-003
+
+Implemented backend search and detail with separate controllers, DTOs/mappers and JPA persistence under `infrastructure`. The frontend remains pending under UI-DEP.
+
+```mermaid
+flowchart LR
+    HR[Authenticated HR] --> Permission[Current employee.read in selected company]
+    Permission --> Scope[Signed database scope]
+    Scope --> Query[Search and select one episode per employee]
+    Query --> Page[Stable page and scoped total]
+    Page --> Select[Choose reference and employee ID]
+    Select --> Detail[Minimal employee and work facts]
+    Query --> Status[CURRENT / UPCOMING / ENDED as of Casablanca date]
+    Status --> Page
+```
+
+Local Swagger: log in as `olarize-demo-admin`, use company `c0000000-0000-4000-8000-000000000001`, then GET employees with `search=Ahmed&asOf=2026-09-30` for two distinct Ahmed references. GET detail using employee `c0000000-0000-4000-8000-000000000080`. `status=ALL` returns five persistent demo rows; ENDED returns Nadia and UPCOMING returns Omar on that date. Default CURRENT omits ended/upcoming records. See [employee directory](employee-directory.md) for parameters, IDs and response details.
+
+Verification: full backend checks pass, including domain/service unit tests, company isolation and revoked-access HTTP checks, outage errors, persistent local seed checks and generated Swagger examples. Database errors remain errors; genuine no-match queries may be empty. Contract expiry does not decide employment status.
+
+Review correction: pagination that exceeds JPA's integer row-offset limit now returns 400. Domain boundary and authenticated HTTP checks cover the limit.
