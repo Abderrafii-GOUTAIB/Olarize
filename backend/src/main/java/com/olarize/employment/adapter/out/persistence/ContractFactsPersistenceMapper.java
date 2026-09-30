@@ -11,6 +11,6 @@ final class ContractFactsPersistenceMapper {
                 version.employeeId, version.episodeId, version.version, version.typeCode,
                 version.startDate, version.endDate, version.sourceReference, version.reviewState,
                 version.changeReason, version.evidenceReference,
-                version.recordedAt.truncatedTo(ChronoUnit.MICROS));
+                version.recordedAt.plusNanos(500).truncatedTo(ChronoUnit.MICROS));
     }
 }
