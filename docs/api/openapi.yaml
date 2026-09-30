@@ -475,6 +475,96 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/assistant/conversations:
+    post:
+      operationId: startExpiryConversation
+      summary: Start an owned expiry conversation
+      description: Creates metadata owned by the authenticated user in the selected company. Requires current contract.read and profile.read. Expires after 24 hours and stores no questions, transcript or HR results. Each request creates a fresh conversation ID; copy it into the next endpoint. No employment facts are changed.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+      responses:
+        '201':
+          description: Owned conversation ID and expiry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConversationResponseDto'}
+        '400':
+          description: Invalid company ID.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: Current contract.read required in selected company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '500':
+          description: Conversation storage unavailable; sanitized problem includes requestId.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/assistant/conversations/{conversationId}/contract-expiry-requests:
+    post:
+      operationId: askForContractExpiries
+      summary: Ask for recorded contract expiries
+      description: Executes at most one allowlisted listExpiringContracts query in an owned, unexpired conversation. Requires current contract.read and profile.read. NEXT_MONTH uses the injected Africa/Casablanca clock. Local runs recognize reviewed synthetic English, French and Arabic questions; this is not live AI. Unknown or ambiguous wording clarifies without a database query. All names, counts and versions come from the authorized service. Use GET contracts/expiring with explicit fromDate and toDate as structured fallback. No confirmation or HR mutation.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {$ref: '#/components/parameters/CompanyId'}
+        - name: conversationId
+          in: path
+          required: true
+          description: Copy the real conversationId from the start-conversation response; another user's ID is inaccessible.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ContractExpiryQuestionRequestDto'}
+      responses:
+        '200':
+          description: RESULTS, EMPTY, CLARIFICATION_REQUIRED or REFUSED. Query results contain the actual service page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContractExpiryAnswerResponseDto'}
+        '400':
+          description: Invalid question, pagination, unknown JSON fields or untrusted provider tool arguments.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '401':
+          description: Missing or invalid Keycloak access token.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: Current contract.read required in selected company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '404':
+          description: Conversation absent, expired or owned by another user/company.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503':
+          description: Provider disabled, timed out, failed or saturated; use the structured GET expiry API.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '500':
+          description: Tool/database unavailable; sanitized problem includes requestId. Failure is never an empty result.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
 components:
   parameters:
     CompanyId:
@@ -887,6 +977,77 @@ components:
             version: 1
             episodeVersion: 1
         pagination: {page: 0, pageSize: 25, totalItems: 2, totalPages: 1}
+    ConversationResponseDto:
+      type: object
+      properties:
+        conversationId: {type: string, format: uuid}
+        companyId: {type: string, format: uuid}
+        expiresAt: {type: string, format: date-time}
+    ContractExpiryQuestionRequestDto:
+      type: object
+      required: [question]
+      additionalProperties: false
+      properties:
+        question: {type: string, minLength: 1, maxLength: 1000}
+        page: {type: integer, minimum: 0, default: 0, nullable: true}
+        pageSize: {type: integer, minimum: 1, maximum: 100, default: 25, nullable: true}
+      example: {question: 'Which contracts expire in October 2026?', page: 0, pageSize: 25}
+    ExpiryContractResponseDto:
+      type: object
+      properties:
+        contractId: {type: string, format: uuid}
+        contractVersion: {type: integer, format: int64}
+        employeeId: {type: string, format: uuid}
+        employeeName: {type: string}
+        employeeReference: {type: string}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date}
+    ExpiryResultResponseDto:
+      type: object
+      properties:
+        companyId: {type: string, format: uuid}
+        fromDate: {type: string, format: date}
+        toDate: {type: string, format: date}
+        asOf: {type: string, format: date}
+        timeZone: {type: string, example: Africa/Casablanca}
+        page: {type: integer}
+        pageSize: {type: integer}
+        totalItems: {type: integer, format: int64}
+        totalPages: {type: integer}
+        currentContractsWithoutRecordedEndDate: {type: integer, format: int64}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ExpiryContractResponseDto'}
+      example:
+        companyId: c0000000-0000-4000-8000-000000000001
+        fromDate: '2026-10-01'
+        toDate: '2026-10-31'
+        asOf: '2026-09-30'
+        timeZone: Africa/Casablanca
+        page: 0
+        pageSize: 25
+        totalItems: 1
+        totalPages: 1
+        currentContractsWithoutRecordedEndDate: 0
+        items:
+          - contractId: c0000000-0000-4000-8000-000000000090
+            contractVersion: 1
+            employeeId: c0000000-0000-4000-8000-000000000070
+            employeeName: Yasmine Bennani
+            employeeReference: EMP-0001
+            startDate: '2026-09-01'
+            endDate: '2026-10-15'
+    ContractExpiryAnswerResponseDto:
+      type: object
+      properties:
+        conversationId: {type: string, format: uuid}
+        status: {type: string, enum: [RESULTS, EMPTY, CLARIFICATION_REQUIRED, REFUSED]}
+        message: {type: string}
+        result:
+          allOf:
+            - {$ref: '#/components/schemas/ExpiryResultResponseDto'}
+          nullable: true
+        fallbackPath: {type: string, example: /api/v1/companies/c0000000-0000-4000-8000-000000000001/contracts/expiring}
     Problem:
       type: object
       required: [type, title, status, detail, code, requestId]

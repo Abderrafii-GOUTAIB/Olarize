@@ -1,0 +1,55 @@
+path: /api/v1/companies/{companyId}/assistant/conversations/{conversationId}/contract-expiry-requests
+post:
+  operationId: askForContractExpiries
+  summary: Ask for recorded contract expiries
+  description: Executes at most one allowlisted listExpiringContracts query in an owned, unexpired conversation. Requires current contract.read and profile.read. NEXT_MONTH uses the injected Africa/Casablanca clock. Local runs recognize reviewed synthetic English, French and Arabic questions; this is not live AI. Unknown or ambiguous wording clarifies without a database query. All names, counts and versions come from the authorized service. Use GET contracts/expiring with explicit fromDate and toDate as structured fallback. No confirmation or HR mutation.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {$ref: '#/components/parameters/CompanyId'}
+    - name: conversationId
+      in: path
+      required: true
+      description: Copy the real conversationId from the start-conversation response; another user's ID is inaccessible.
+      schema: {type: string, format: uuid}
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema: {$ref: '#/components/schemas/ContractExpiryQuestionRequestDto'}
+  responses:
+    '200':
+      description: RESULTS, EMPTY, CLARIFICATION_REQUIRED or REFUSED. Query results contain the actual service page.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ContractExpiryAnswerResponseDto'}
+    '400':
+      description: Invalid question, pagination, unknown JSON fields or untrusted provider tool arguments.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '401':
+      description: Missing or invalid Keycloak access token.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '403':
+      description: Current contract.read required in selected company.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '404':
+      description: Conversation absent, expired or owned by another user/company.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '503':
+      description: Provider disabled, timed out, failed or saturated; use the structured GET expiry API.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    '500':
+      description: Tool/database unavailable; sanitized problem includes requestId. Failure is never an empty result.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

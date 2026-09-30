@@ -113,3 +113,9 @@ Verified on 2026-09-30 after OLARIZE-4 and the identity/employment web package s
 Verified on 2026-09-30 after moving all business-module technical packages to `infrastructure` and splitting persistence into `entity`, `repository`, `mapper` and `adapter`: `./scripts/verify-backend.sh` passed all 97 tests. Independent structural review found no actionable issues.
 
 Verified on 2026-09-30 for OLARIZE-6 / EMP-003 directory/detail: full `./scripts/verify-backend.sh` passed 106 tests. After the review correction for JPA row-offset limits, focused `EmployeeDirectoryFilterTests,CompanyContextIntegrationTests` verification passed 33 tests. Local migrations and generated Swagger checks confirm five persistent demo employee records, including two Ahmed references. See [employee directory](employee-directory.md) for exact calls. Frontend and live browser login acceptance remain pending.
+
+## Local contract expiry assistant backend
+
+OLARIZE-5 adds owned conversation and expiry-request POST APIs. Only local runs use the deterministic synthetic intent planner; other profiles report provider unavailable. Existing contract permissions and PostgreSQL scope apply. Local V907 persists a synthetic October 2026 contract, so the exact example `Which contracts expire in October 2026?` returns Yasmine. Create a fresh owned conversation first. See [assistant expiry testing](assistant-contract-expiry.md). This scope does not enable live AI or the frontend.
+
+Verified on 2026-09-30 for OLARIZE-5: full `./scripts/verify-backend.sh` passed 117 tests, zero failures/errors/skips. The subsequent `CompanyContextIntegrationTests` run passed 32 tests including direct conversation ownership and forged-context RLS checks. Independent review found no actionable findings. No live provider or browser-login claim is made.

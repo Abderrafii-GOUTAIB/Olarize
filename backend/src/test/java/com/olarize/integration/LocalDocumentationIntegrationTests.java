@@ -178,6 +178,28 @@ class LocalDocumentationIntegrationTests {
         });
     }
 
+    @Test void assistantSwaggerDocumentsOwnedConversationsAndPersistentExpiryExample() throws Exception {
+        var api = mapper.readTree(get("/v3/api-docs").body());
+        var paths = api.path("paths");
+        var create = paths.path("/api/v1/companies/{companyId}/assistant/conversations").path("post");
+        var ask = paths.path("/api/v1/companies/{companyId}/assistant/conversations/{conversationId}/contract-expiry-requests").path("post");
+        assertThat(create.path("description").asText()).contains("24 hours", "contract.read", "no question");
+        assertThat(ask.path("description").asText()).contains("Africa/Casablanca", "synthetic", "structured fallback");
+        assertThat(ask.path("responses").path("503").path("description").asText()).contains("timed out");
+        var schemas = api.path("components").path("schemas");
+        assertThat(schemas.path("ContractExpiryQuestionRequestDto").path("example").path("question").asText())
+                .isEqualTo("Which contracts expire in October 2026?");
+        assertThat(schemas.path("ExpiryResultResponseDto").path("example").path("items").get(0).path("employeeName").asText())
+                .isEqualTo("Yasmine Bennani");
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        transaction.executeWithoutResult(status -> {
+            scope.apply(jdbc, "c0000000-0000-4000-8000-000000000011",
+                    java.util.UUID.fromString("c0000000-0000-4000-8000-000000000001"));
+            assertThat(jdbc.queryForObject("select count(*) from employment_contract_version where contract_id = ?::uuid and end_date = date '2026-10-15'",
+                    Integer.class, "c0000000-0000-4000-8000-000000000090")).isEqualTo(1);
+        });
+    }
+
     @Test void swaggerUiLoadsLocallyWithoutOpeningHrRoutes() throws Exception {
         var response = get("/swagger-ui/index.html");
         assertThat(response.statusCode()).isEqualTo(200);
