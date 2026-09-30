@@ -29,6 +29,9 @@ abstract class SharedDeploymentProfileIntegrationTests {
 
     @DynamicPropertySource
     static void runtimeConfiguration(DynamicPropertyRegistry properties) {
+        // Shared deployments run migrations separately; this intentionally empty
+        // test database checks profile behavior rather than schema validation.
+        properties.add("spring.jpa.hibernate.ddl-auto", () -> "none");
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", POSTGRES::getUsername);
         properties.add("spring.datasource.password", POSTGRES::getPassword);

@@ -45,7 +45,8 @@ class SecurityConfiguration {
                 .requestMatchers(HttpMethod.GET, "/api/v1/identity", "/api/v1/identity/memberships", "/api/v1/identity/company-context").hasAuthority("SCOPE_profile.read")
                 .requestMatchers(HttpMethod.GET, "/api/v1/companies/*/memberships").hasAuthority("SCOPE_profile.read")
                 .requestMatchers(HttpMethod.POST, "/api/v1/companies/*/membership-change-previews",
-                        "/api/v1/companies/*/membership-changes/confirm").hasAuthority("SCOPE_profile.read")
+                        "/api/v1/companies/*/membership-changes/confirm",
+                        "/api/v1/companies/*/employees").hasAuthority("SCOPE_profile.read")
                 .anyRequest().denyAll())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .oauth2ResourceServer(oauth -> oauth

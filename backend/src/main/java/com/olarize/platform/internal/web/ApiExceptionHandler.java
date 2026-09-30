@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -28,6 +29,21 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             problem.setProperty("errors", validation.getBindingResult().getFieldErrors().stream()
                     .map(error -> Map.of("field", error.getField(), "code",
                             error.getCode() == null ? "Invalid" : error.getCode())).toList());
+        } else if (ex instanceof HttpMessageNotReadableException unreadable) {
+            String field = "request";
+            Throwable cause = unreadable;
+            while (cause != null) {
+                if (cause instanceof tools.jackson.databind.DatabindException mapping
+                        && !mapping.getPath().isEmpty()) {
+                    String path = mapping.getPathReference();
+                    java.util.regex.Matcher property = java.util.regex.Pattern
+                            .compile("\\[\\\"([A-Za-z][A-Za-z0-9]*)\\\"\\]$").matcher(path);
+                    if (property.find()) field = property.group(1);
+                    break;
+                }
+                cause = cause.getCause();
+            }
+            problem.setProperty("errors", java.util.List.of(Map.of("field", field, "code", "Invalid")));
         }
         return new ResponseEntity<>(problem, headers, statusCode);
     }

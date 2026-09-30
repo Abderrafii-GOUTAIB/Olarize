@@ -20,6 +20,9 @@ flowchart TD
     ScopeKey[Private PostgreSQL scope key]
     ProvisionCompany[Restricted provision-company command]
     ProvisionMembership[Restricted provision-membership command]
+    HR[HR member with employee.write]
+    CreateEmployee[POST /companies/{companyId}/employees]
+    EmployeeRecord[Employee + first episode + audit]
 
     User --> Keycloak
     Keycloak -->|Bearer token| API
@@ -42,16 +45,46 @@ flowchart TD
     DB -->|next request reads current permissions| API
     ProvisionCompany -->|company + audit receipt| DB
     ProvisionMembership -->|membership + audit receipt| DB
+    HR -->|confirmed minimum facts + retry UUID| CreateEmployee
+    CreateEmployee -->|current company membership + signed scope| DB
+    CreateEmployee -->|one transaction| EmployeeRecord
+    EmployeeRecord --> DB
     LocalSeed[Local-profile synthetic company and memberships]
     LocalSeed -->|one-time Flyway seed; retained in volume| DB
     LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin user ID]
     DemoAdmin -->|Bearer token in Swagger| AdminAPI
 
-    Planned[Employee records, leave, attendance, payroll, documents, product AI and frontend]
+    Planned[Employee directory, leave, attendance, payroll, documents, product AI and frontend]
     Planned -. not implemented .-> API
 ```
 
 The two provisioning commands are controlled operator workflows. They are not public API routes and do not start the web server.
+
+## Minimum employee creation flow (EMP-002 backend)
+
+```mermaid
+sequenceDiagram
+    actor HR
+    participant API as Employee API
+    participant Identity as Current company membership
+    participant Service as CreateEmployeeService
+    participant DB as PostgreSQL with RLS
+    HR->>API: POST /companies/{companyId}/employees (confirmed facts + retry UUID)
+    API->>Service: Validated minimum facts
+    Service->>Identity: Require current employee.write in selected company
+    Identity-->>Service: Verified actor and company
+    Service->>DB: Set signed transaction scope and serialize retry key
+    alt Exact retry already committed
+        DB-->>Service: Existing employee and episode IDs
+    else New creation
+        Service->>DB: Insert employee, episode, audit and retry receipt atomically
+        DB-->>Service: Stable IDs and version 1
+    end
+    Service-->>API: Status derived as of Africa/Casablanca today
+    API-->>HR: 201 employee ID, episode ID, reference, date, status, version
+```
+
+This API records factual minimum employment data. The accessible creation form awaits UI-DEP; no product frontend exists yet. An HR user can test the backend with local Swagger as described in [employee creation](employment-creation.md).
 
 ## Company membership administration flow (IAM-001)
 
@@ -135,7 +168,8 @@ The API derives identity from the verified token. A requested company ID selects
 | EMP-001 membership list and company context | Implemented locally; production identity-operator setup remains pending | `./scripts/verify-backend.sh` includes signed-token HTTP and PostgreSQL membership tests. | Start the local stack and sign into Swagger as `olarize-demo-admin` (setup in [local authentication](authentication.md)). `GET /api/v1/identity/memberships` returns the seeded demo company membership; `GET /api/v1/identity/company-context` returns its company and permissions. The local demo member has an ordinary `EMPLOYEE` membership for demonstrating role-specific results. |
 | IAM-001 company membership administration | Implemented locally; production identity-admin authority remains gated by OD-03 | `./scripts/verify-backend.sh` exercises list, grant, role change, reactivation, revocation, provider failures, audit rollback, retries, concurrency and next-request permissions with PostgreSQL Testcontainers and synthetic signed tokens. Generated Swagger declares `profile.read` on the company membership list, preview and confirmation operations so it sends the authorized access token. The persistence classes use searchable `JdbcRepository` names and `MembershipJdbcMapper` handles SQL rows. | Sign into local Swagger as `olarize-demo-admin`. Use the company ID returned by `GET /api/v1/identity/memberships` to list that company's memberships, then copy the chosen row's `userId` into the preview request. The seeded ordinary member supports a role-change preview. New grants and reactivations need the local Keycloak admin service account described in [membership administration](membership-administration.md). This synthetic local identity-admin record is not production authority. |
 | IAM-002 PostgreSQL company isolation | Implemented for current organization and identity tables using a signed database scope | `./scripts/verify-backend.sh` runs restricted-runtime PostgreSQL tests for missing/forged scope, administrator impersonation, cross-company reads, joins, aggregates, revocation, audit references, transaction cleanup and role privileges. | In local Swagger, sign in as `olarize-demo-admin`; the existing membership and company-context endpoints return the seeded Demo Morocco SARL data. Sign in as a user without that company membership to check access denial. IAM-002 adds no new HTTP endpoint; see [company isolation](company-isolation.md). |
-| Employee records, leave, attendance, payroll, documents, product AI and frontend | Not implemented | No feature test exists yet | Track these in the requirements and task files; do not treat a planned flow as usable functionality. |
+| EMP-002 minimum employee creation | Backend API implemented; accessible form awaits UI-DEP | `./scripts/verify-backend.sh` covers confirmed creation, same-key retry, duplicate company reference, permission/scope denial, audit rollback and restricted-runtime RLS. | Sign into local Swagger as `olarize-demo-admin`, choose the seeded company, and POST a new reference such as `EMP-0007`; see [employee creation](employment-creation.md). |
+| Employee directory, leave, attendance, payroll, documents, product AI and frontend | Not implemented | No feature test exists yet | Track these in the requirements and task files; do not treat a planned flow as usable functionality. |
 
 The local Swagger integration check starts a disposable PostgreSQL container for both the API datasource and Flyway migrations. CI does not need the developer's database on `localhost:5433`; a missing local database no longer prevents the Swagger contract tests from starting.
 
@@ -147,7 +181,7 @@ From the repository root, with Docker available:
 ./scripts/verify-backend.sh
 ```
 
-This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current recorded IAM-002 evidence is in [task 007](../.instructions/tasks/007-postgresql-company-isolation.md); IAM-001 evidence is in [task 006](../.instructions/tasks/006-membership-administration.md); EMP-001 evidence is in [task 005](../.instructions/tasks/005-company-context.md). The command reruns checks against your current checkout.
+This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current EMP-002 evidence is in [task 008](../.instructions/tasks/008-minimum-employee-record.md); IAM-002 evidence is in [task 007](../.instructions/tasks/007-postgresql-company-isolation.md). The command reruns checks against your current checkout.
 
 For hands-on API checks:
 
@@ -155,7 +189,7 @@ For hands-on API checks:
 docker compose --profile app up -d --build --wait
 ```
 
-Then open [local Swagger](http://localhost:8080/swagger-ui/index.html), choose the Keycloak `profile.read` authorization, and sign in as a synthetic local user. Swagger and its login flow are available only in the local profile. See [local authentication](authentication.md) for account setup and [development](development.md) for startup and troubleshooting.
+Then open Swagger on the configured `BACKEND_PORT` (for example `http://localhost:8082/swagger-ui/index.html`), choose the Keycloak `profile.read` authorization, and sign in as a synthetic local user. Swagger and its login flow are available only in the local profile. See [local authentication](authentication.md) for account setup and [development](development.md) for startup and troubleshooting.
 
 To stop the stack while preserving local data:
 
@@ -170,5 +204,7 @@ Implementing code follows a separate workflow: approved story → ticket branch 
 ## Swagger examples for the local demo
 
 Swagger examples now use Demo Morocco SARL (`c0000000-0000-4000-8000-000000000001`), its demo administrator (user ID ending `0011`) and ordinary member (user ID ending `0021`). These match the existing persistent local SQL seed; examples do not insert or reset records.
+
+EMP-002 adds an explicit local `employee.write` grant to `olarize-demo-admin` and a persistent synthetic employee `EMP-0001`. Swagger's create example uses a fresh reference `EMP-0007` and returns actual saved IDs when executed; see [employee creation](employment-creation.md).
 
 Sign in as `olarize-demo-admin`, list the company memberships, then copy the chosen row's `userId` into the preview request. `GET /api/v1/identity` returns `currentUserId` for the signed-in person; it is only needed to check who is signed in. The demo preview changes the ordinary member from `EMPLOYEE` to `MANAGER`. Copy the returned `previewToken` and `targetVersion` into the confirmation request and use a new UUID as the idempotency key. Reuse that UUID only for an identical retry. The documented token placeholder cannot be executed. Confirmation updates the existing membership and appends an audit record. A second attempt needs current data and a different requested role if the member is already a manager. Response examples describe the initial seed and the first successful change; use actual responses for current state.
