@@ -26,13 +26,13 @@ post:
     required: true
     content:
       application/json:
-        schema: {$ref: '#/components/schemas/CorrectContractRequest'}
+        schema: {$ref: '#/components/schemas/CorrectContractRequestDto'}
   responses:
     '200':
       description: New contract version and audit evidence were committed.
       content:
         application/json:
-          schema: {$ref: '#/components/schemas/ContractResponse'}
+          schema: {$ref: '#/components/schemas/ContractResponseDto'}
     '400':
       description: Invalid date interval, type code, version, reason, evidence reference, or unconfirmed request.
       content:

@@ -1,6 +1,6 @@
 # Draft: Olarize features and hexagonal layers
 
-This is a visual guide to the backend as it exists today. Olarize is one Spring Boot application with two implemented business features, `identity` and `organization`. Each feature owns its domain, application logic and adapters. `platform` supplies shared security, API errors and request IDs. Employee records, leave, payroll and the other planned features are not implemented yet.
+This is a visual guide to the backend as it exists today. Olarize is one Spring Boot application with three implemented business modules, `identity`, `organization` and `employment`. Each feature owns its domain, application logic and adapters. `platform` supplies shared security, API errors and request IDs. Employment implements employee creation, versioned contract facts and the contract expiry list. Leave, payroll and the other planned modules remain separate work.
 
 ## Features first, layers inside each feature
 
@@ -15,40 +15,51 @@ flowchart TB
         Platform[platform<br/>security · API errors · request IDs]
 
         subgraph Identity[identity feature]
-            IdentityIn[adapter/in<br/>web controllers · security · CLI]
+            IdentityIn[infrastructure/in<br/>web controllers · security · CLI]
             IdentityApp[application<br/>ports · services]
             IdentityDomain[domain<br/>membership models · rules]
-            IdentityOut[adapter/out<br/>JDBC repositories · Keycloak adapter · token signer]
+            IdentityOut[infrastructure/out<br/>JDBC repositories · Keycloak adapter · token signer]
             IdentityIn --> IdentityApp
             IdentityApp --> IdentityDomain
             IdentityApp --> IdentityOut
         end
 
         subgraph Organization[organization feature]
-            OrganizationIn[adapter/in<br/>provision-company CLI]
+            OrganizationIn[infrastructure/in<br/>provision-company CLI]
             OrganizationApp[application<br/>ports · ProvisionCompanyService]
             OrganizationDomain[domain<br/>company registration rules]
-            OrganizationOut[adapter/out<br/>company JDBC repositories]
+            OrganizationOut[infrastructure/out<br/>company JDBC repositories]
             OrganizationIn --> OrganizationApp
             OrganizationApp --> OrganizationDomain
             OrganizationApp --> OrganizationOut
         end
+        subgraph Employment[employment module]
+            EmploymentIn[infrastructure/in/web<br/>employee and contract controllers]
+            EmploymentApp[application<br/>use-case ports · services]
+            EmploymentDomain[domain<br/>employee and contract rules]
+            EmploymentOut[infrastructure/out/persistence<br/>adapters · JPA repositories · mappers · entities]
+            EmploymentIn --> EmploymentApp
+            EmploymentApp --> EmploymentDomain
+            EmploymentApp --> EmploymentOut
+        end
     end
 
     Caller --> Platform --> IdentityIn
+    Platform --> EmploymentIn
+    EmploymentOut --> Database
     Operator --> OrganizationIn
     IdentityOut --> Database
     IdentityOut --> Keycloak
     OrganizationOut --> Database
 ```
 
-The arrows above show how a request travels. Each feature keeps its code together; there is no single project-wide `controllers/`, `services/` or `repositories/` folder.
+The arrows above show runtime request flow, not Java dependency direction. Application code depends on ports; infrastructure implementations provide those ports and never become application dependencies. Each feature keeps its code together; there is no single project-wide `controllers/`, `services/` or `repositories/` folder.
 
 ## Zoom in: changing a company membership
 
 ```mermaid
 flowchart LR
-    Request[HTTP request] --> Controller[adapter/in/web<br/>MembershipAdministrationController]
+    Request[HTTP request] --> Controller[infrastructure/in/web/controller<br/>MembershipAdministrationController]
 
     subgraph Identity[identity feature]
         Controller --> InPort[application/port/in<br/>MembershipAdministrationUseCase]
@@ -56,8 +67,8 @@ flowchart LR
         Service --> Rules[domain/model<br/>MembershipAdministrationRules]
         Service --> OutPort[application/port/out<br/>MembershipAdministrationPort]
         Service --> VerifyPort[application/port/out<br/>IdentitySubjectVerificationPort]
-        Repository[adapter/out/persistence<br/>MembershipAdministrationJdbcRepository] -. implements .-> OutPort
-        KeycloakAdapter[adapter/out/external<br/>KeycloakSubjectVerificationAdapter] -. implements .-> VerifyPort
+        Repository[infrastructure/out/persistence/repository<br/>MembershipAdministrationJdbcRepository] -. implements .-> OutPort
+        KeycloakAdapter[infrastructure/out/external<br/>KeycloakSubjectVerificationAdapter] -. implements .-> VerifyPort
     end
 
     Repository --> Database[(PostgreSQL)]
@@ -66,7 +77,7 @@ flowchart LR
 
 The **incoming adapter** translates HTTP into a use-case call. The **incoming port** says what the application offers. The **service** runs the membership rules. The **outgoing ports** say what the service needs from storage and Keycloak. The **outgoing adapters** provide those capabilities. Dotted arrows mean “implements this port.” In source code, the service depends on port interfaces; dependency injection connects it to the adapters.
 
-For this feature, `MembershipJdbcMapper` converts SQL rows to domain `Membership` objects. Request and response DTOs live beside the controller in `adapter/in/web`; the repository and mapper live in `adapter/out/persistence`. The current persistence implementation uses JDBC, so these files have `JdbcRepository` and `JdbcMapper` suffixes. There are no JPA entities or `JpaRepository` interfaces yet.
+For this feature, `MembershipJdbcMapper` converts SQL rows to domain `Membership` objects. Controllers, request DTOs, response DTOs, web mappers and OpenAPI configuration have separate folders under `infrastructure/in/web`. Transport classes use `RequestDto`/`ResponseDto` suffixes. Identity and organization retain approved JDBC repositories; employment uses JPA entities and Spring Data repositories. Persistence classes live in `entity`, `repository`, `mapper` and `adapter` subfolders as needed.
 
 ## Folder shape
 
@@ -78,13 +89,32 @@ com/olarize/
 │   │   ├── port/in/      use cases called by controllers
 │   │   ├── port/out/     contracts needed by services
 │   │   └── service/      business workflow
-│   └── adapter/
+│   └── infrastructure/
 │       ├── in/           web, security and CLI entry points
 │       └── out/          JDBC, Keycloak and token implementations
 ├── organization/
 │   ├── domain/
 │   ├── application/
-│   └── adapter/
+│   └── infrastructure/
+├── employment/
+│   ├── domain/
+│   ├── application/
+│   │   ├── port/in/
+│   │   ├── port/out/
+│   │   ├── service/
+│   │   └── exception/
+│   └── infrastructure/
+│       ├── in/web/
+│       │   ├── controller/
+│       │   ├── dto/request/
+│       │   ├── dto/response/
+│       │   ├── mapper/
+│       │   └── configuration/
+│       └── out/persistence/
+│           ├── entity/
+│           ├── repository/
+│           ├── mapper/
+│           └── adapter/
 └── platform/             shared technical infrastructure
 ```
 

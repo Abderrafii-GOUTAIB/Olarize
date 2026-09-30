@@ -21,13 +21,13 @@ post:
     required: true
     content:
       application/json:
-        schema: {$ref: '#/components/schemas/CreateContractRequest'}
+        schema: {$ref: '#/components/schemas/CreateContractRequestDto'}
   responses:
     '201':
       description: Contract facts, version 1, and audit evidence were committed.
       content:
         application/json:
-          schema: {$ref: '#/components/schemas/ContractResponse'}
+          schema: {$ref: '#/components/schemas/ContractResponseDto'}
     '400':
       description: Invalid date interval, invalid type code, unsupported or oversized field, or confirm is not true.
       content:

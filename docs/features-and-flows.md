@@ -56,6 +56,10 @@ flowchart TD
     ContractAPI -->|current contract permission + signed scope| DB
     ContractAPI -->|append version, audit and receipt atomically| ContractVersions
     ContractVersions --> DB
+    ContractHR -->|inclusive date range| ExpiryAPI[GET /companies/{companyId}/contracts/expiring]
+    ExpiryAPI -->|current contract.read + signed scope| DB
+    DB -->|current versions + missing-date count| ExpiryAPI
+    ExpiryAPI -->|bounded page, stable order| ContractHR
     LocalSeed[Local-profile synthetic company and memberships]
     LocalSeed -->|one-time Flyway seed; retained in volume| DB
     LocalSeed -. local only .-> DemoAdmin[olarize-demo-admin user ID]
@@ -122,6 +126,27 @@ sequenceDiagram
 ```
 
 Contract type codes are recorded as supplied labels, and every version remains `UNREVIEWED`. The API does not assess legality, renewal, payroll eligibility, or employment/account state. A missing end date is `NOT_RECORDED`; no expiry is guessed. These endpoints have individual contracts in [`docs/api/employment/`](api/employment/) and Swagger examples use the persistent synthetic contract in [contract facts](employment-contract-facts.md). The accessible form and document upload remain separate work.
+
+## Contract expiry list flow (EMP-005 backend)
+
+```mermaid
+sequenceDiagram
+    actor HR
+    participant API as Expiring contracts API
+    participant Identity as Current company membership
+    participant Service as ListExpiringContractsService
+    participant DB as PostgreSQL with RLS
+    HR->>API: GET contracts/expiring?fromDate=...&toDate=...
+    API->>Service: Validate inclusive date window and page bounds
+    Service->>Identity: Require current contract.read in selected company
+    Identity-->>Service: Verified actor and company
+    Service->>DB: Set signed scope; query current versions and company coverage
+    DB-->>Service: Ordered page and missing-end-date count
+    Service-->>API: Result with date window, timezone and pagination
+    API-->>HR: 200 current contract facts (empty items when no matches)
+```
+
+The endpoint selects current versions only and sorts by recorded end date then contract ID. The inclusive date window is limited to 366 days, with 25 rows per page by default and a maximum of 100. The separate missing-end-date count covers current contracts in the selected company; it does not imply they expire. See [the contract expiry list](employment-contract-expiry.md) for the persistent Swagger example and exact call.
 
 ## Company membership administration flow (IAM-001)
 
@@ -207,6 +232,7 @@ The API derives identity from the verified token. A requested company ID selects
 | IAM-002 PostgreSQL company isolation | Implemented for current organization and identity tables using a signed database scope | `./scripts/verify-backend.sh` runs restricted-runtime PostgreSQL tests for missing/forged scope, administrator impersonation, cross-company reads, joins, aggregates, revocation, audit references, transaction cleanup and role privileges. | In local Swagger, sign in as `olarize-demo-admin`; the existing membership and company-context endpoints return the seeded Demo Morocco SARL data. Sign in as a user without that company membership to check access denial. IAM-002 adds no new HTTP endpoint; see [company isolation](company-isolation.md). |
 | EMP-002 minimum employee creation | Backend API implemented; accessible form awaits UI-DEP | `./scripts/verify-backend.sh` covers confirmed creation, same-key retry, duplicate company reference, permission/scope denial, audit rollback and restricted-runtime RLS. | Sign into local Swagger as `olarize-demo-admin`, choose the seeded company, and POST a new reference such as `EMP-0007`; see [employee creation](employment-creation.md). |
 | EMP-004 contract facts | Backend create/correction APIs implemented; accessible review form and document storage remain separate | `./scripts/verify-backend.sh` covers date and type validation, company permission/RLS, version history, exact retries, stale/concurrent corrections and atomic audit rollback. | Sign into local Swagger as `olarize-demo-admin`. Use the seeded company, employee, episode and contract IDs; see [contract facts](employment-contract-facts.md). |
+| EMP-005 contract expiry list | Backend read API implemented and verified; notifications and renewal decisions remain separate | Tests cover inclusive windows, current versions, deterministic pagination, missing-date coverage, company isolation and `contract.read` authorization; Full backend verification passed: 97 tests, including PostgreSQL integration and local OpenAPI. | Sign into local Swagger as `olarize-demo-admin`, then call `GET /api/v1/companies/c0000000-0000-4000-8000-000000000001/contracts/expiring?fromDate=2027-01-01&toDate=2027-12-31`; it returns Yasmine Bennani's seeded contract. See [contract expiry list](employment-contract-expiry.md). |
 | Employee directory, leave, attendance, payroll, documents, product AI and frontend | Not implemented | No feature test exists yet | Track these in the requirements and task files; do not treat a planned flow as usable functionality. |
 
 The local Swagger integration check starts a disposable PostgreSQL container for both the API datasource and Flyway migrations. CI does not need the developer's database on `localhost:5433`; a missing local database no longer prevents the Swagger contract tests from starting.
@@ -219,7 +245,7 @@ From the repository root, with Docker available:
 ./scripts/verify-backend.sh
 ```
 
-This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current EMP-004 evidence is in [task 009](../.instructions/tasks/009-contract-facts.md); EMP-002 evidence is in [task 008](../.instructions/tasks/008-minimum-employee-record.md). The command reruns checks against your current checkout.
+This runs the unit, architecture, signed-token HTTP and disposable PostgreSQL integration tests, then packages the backend. Local Swagger demo rows use a separate Flyway location enabled only by the local profile; they are not test fixtures and remain in the PostgreSQL volume across app restarts. This command does not test a production deployment. Current EMP-005 evidence is in [task 010](../.instructions/tasks/010-expiring-contracts.md); EMP-004 evidence is in [task 009](../.instructions/tasks/009-contract-facts.md); EMP-002 evidence is in [task 008](../.instructions/tasks/008-minimum-employee-record.md). The command reruns checks against your current checkout.
 
 For hands-on API checks:
 
@@ -246,3 +272,27 @@ Swagger examples now use Demo Morocco SARL (`c0000000-0000-4000-8000-00000000000
 EMP-002 adds an explicit local `employee.write` grant to `olarize-demo-admin` and a persistent synthetic employee `EMP-0001`. Swagger's create example uses a fresh reference `EMP-0007` and returns actual saved IDs when executed; see [employee creation](employment-creation.md).
 
 Sign in as `olarize-demo-admin`, list the company memberships, then copy the chosen row's `userId` into the preview request. `GET /api/v1/identity` returns `currentUserId` for the signed-in person; it is only needed to check who is signed in. The demo preview changes the ordinary member from `EMPLOYEE` to `MANAGER`. Copy the returned `previewToken` and `targetVersion` into the confirmation request and use a new UUID as the idempotency key. Reuse that UUID only for an identical retry. The documented token placeholder cannot be executed. Confirmation updates the existing membership and appends an audit record. A second attempt needs current data and a different requested role if the member is already a manager. Response examples describe the initial seed and the first successful change; use actual responses for current state.
+
+### Web package organization
+
+Identity and employment HTTP adapters now separate controllers, request/response DTOs, mappers and OpenAPI configuration. Transport classes use `RequestDto`/`ResponseDto`; endpoint URLs and JSON fields are unchanged. `./scripts/verify-backend.sh` passed all 97 tests after the move, including compilation, PostgreSQL/HTTP integration, local OpenAPI and architecture checks.
+
+Employment exception organization: creation conflicts, contract conflicts and missing contract records now live in `application/exception`. Their existing HTTP mappings and feature flows are unchanged. Verified with production/test compilation and both architecture tests passing; focused independent review found no issues.
+
+### Infrastructure layout
+
+All employment, identity and organization technical adapters now live under `infrastructure/in` and `infrastructure/out`. Persistence separates entities, repositories, mappers and port adapters. The application ports and endpoint flows remain unchanged; JPA entity fields remain private across the new package boundaries. `./scripts/verify-backend.sh` passed all 97 tests after this move, including PostgreSQL, HTTP, Swagger and architecture checks. Independent review found no actionable issues.
+
+```mermaid
+flowchart LR
+    Web["infrastructure/in/web/controller"] --> UseCase["application/port/in"]
+    UseCase --> Service["application/service"]
+    Service --> Domain["domain"]
+    Service --> Port["application/port/out"]
+    Persistence["infrastructure/out/persistence/adapter"] -. implements .-> Port
+    Persistence --> Repository["persistence/repository"]
+    Repository --> Entity["persistence/entity"]
+    Persistence --> Mapper["persistence/mapper"]
+```
+
+The independent review documentation finding is resolved: README and the hexagonal draft now show the infrastructure layout and implemented employment module. The draft labels runtime flow separately from Java dependencies on ports.

@@ -1,5 +1,7 @@
 package com.olarize.employment.application.service;
 
+import com.olarize.employment.application.exception.ContractFactsConflict;
+
 import com.olarize.employment.application.port.in.ContractVersionResponse;
 import com.olarize.employment.application.port.out.ContractFactsPort;
 import com.olarize.employment.domain.model.ContractFacts;

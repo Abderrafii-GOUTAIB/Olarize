@@ -1,5 +1,7 @@
 package com.olarize.employment.application.service;
 
+import com.olarize.employment.application.exception.EmployeeCreationConflict;
+
 import com.olarize.employment.application.port.in.CreateEmployeeUseCase;
 import com.olarize.employment.application.port.out.EmployeeCreationPort;
 import com.olarize.employment.domain.model.EmployeeCreation;

@@ -107,3 +107,7 @@ Git uses its configured push authentication. GitHub API access uses `GITHUB_TOKE
 Verify publication behavior without network calls using `python3 scripts/test-publish-pr.py`.
 
 Verified 2026-09-28 for EMP-001: after the package/service naming refactor and company-lookup pool-contention fix, the full backend suite passed 63 tests with zero failures/errors/skips, including PostgreSQL/HTTP tests for concurrent company lookups with a two-connection pool. The packaged command smoke check returned sanitized invalid-input JSON without starting Spring or HTTP. Independent review found and verified the pool-contention fix; no open P0–P2 findings remain. See [task 005](../.instructions/tasks/005-company-context.md) for evidence and remaining OD-03 prerequisites.
+
+Verified on 2026-09-30 after OLARIZE-4 and the identity/employment web package split: `./scripts/verify-backend.sh` passed 97 tests with PostgreSQL Testcontainers, HTTP, Swagger and architecture checks. Transport classes use `RequestDto`/`ResponseDto` in separate web DTO packages.
+
+Verified on 2026-09-30 after moving all business-module technical packages to `infrastructure` and splitting persistence into `entity`, `repository`, `mapper` and `adapter`: `./scripts/verify-backend.sh` passed all 97 tests. Independent structural review found no actionable issues.
