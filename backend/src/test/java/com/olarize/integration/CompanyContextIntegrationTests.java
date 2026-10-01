@@ -158,10 +158,22 @@ class CompanyContextIntegrationTests {
         owner.execute("grant execute on function public.olarize_can_write_contract(uuid) to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_read_contract(uuid) to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_read_employee(uuid) to membership_runtime");
+        owner.execute("grant select, insert, update on employment_account_link to membership_runtime");
+        owner.execute("grant select, insert on employment_account_link_audit to membership_runtime");
+        owner.execute("grant select on employment_employee to olarize_identity_provisioner_owner");
+        owner.execute("grant execute on function public.olarize_can_read_employee(uuid), public.olarize_can_write_employee(uuid), public.olarize_can_read_contract(uuid) to olarize_identity_provisioner_owner");
+        for (String signature : List.of("olarize_can_administer_employee_link(uuid)", "olarize_employee_link_membership(uuid,uuid,boolean)",
+                "olarize_employee_link_target_allowed(uuid,uuid,boolean)", "olarize_employee_link_target_exists(uuid,uuid)")) {
+            owner.execute("alter function public." + signature + " owner to olarize_identity_provisioner_owner");
+            owner.execute("grant execute on function public." + signature + " to membership_runtime");
+        }
         owner.execute("grant execute on function public.provision_identity_membership(uuid,text,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
         owner.execute("grant select on organization_company to olarize_identity_provisioner_owner");
         owner.execute("grant select, insert, update on identity_membership to olarize_identity_provisioner_owner");
         owner.execute("grant select, insert on identity_membership_change_audit to olarize_identity_provisioner_owner");
+        owner.execute("grant select, insert on identity_employee_link_authority_audit to olarize_identity_provisioner_owner");
+        owner.execute("alter function public.provision_employee_link_authority(uuid,uuid,text,bigint,text,text,uuid,uuid) owner to olarize_identity_provisioner_owner");
+        owner.execute("grant execute on function public.provision_employee_link_authority(uuid,uuid,text,bigint,text,text,uuid,uuid) to olarize_identity_provisioner");
         owner.execute("alter table identity_membership_change_audit owner to olarize_identity_provisioner_owner");
         owner.execute("alter function public.list_company_identity_memberships(text,uuid) owner to olarize_identity_provisioner_owner");
         owner.execute("alter function public.change_company_membership(text,uuid,text,text,text,bigint,bigint,text,uuid,text) owner to olarize_identity_provisioner_owner");
@@ -703,6 +715,208 @@ class CompanyContextIntegrationTests {
         });
         assertThat(jdbc.queryForObject("select count(*) from employment_job_version", Integer.class)).isZero();
         assertThatThrownBy(() -> jdbc.update("update employment_employee_version set reason = 'Changed' where employee_id = ?", e.employeeId()))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+    }
+
+    private String linkPath(UUID company, UUID membership) {
+        return "/api/v1/companies/" + company + "/employee-account-links/" + membership;
+    }
+    private String linkRequest(String action, UUID employee, long version, long membershipVersion, UUID key) {
+        return """
+                {"action":"%s","employeeId":%s,"expectedVersion":%d,"expectedMembershipVersion":%d,
+                 "reason":"Reviewed synthetic identity","verificationEvidenceReference":"SYNTHETIC-VERIFICATION-001",
+                 "idempotencyKey":"%s","confirm":true}
+                """.formatted(action, employee == null ? "null" : "\"" + employee + "\"", version, membershipVersion, key);
+    }
+
+    @Test void operatorExplicitlyProvisionsLinkAuthorityWithImmutableRetryAndCurrentTokenPermissions() throws Exception {
+        var operator = new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), "membership_operator", "synthetic-only"));
+        UUID c = company(); UUID foreign = company(); String admin = subject();
+        UUID member = membership(admin, c, "ACTIVE", "identity.admin");
+        UUID target = membership(subject(), c, "ACTIVE", "employee.self.read");
+        String bearer = token(admin); String path = linkPath(c, target);
+        assertThat(authenticatedGet(path, bearer).statusCode()).isEqualTo(403);
+        String sql = "select * from public.provision_employee_link_authority(?,?,?,?::bigint,?,?,?,?)";
+        UUID key = UUID.randomUUID(); UUID correlation = UUID.randomUUID();
+        Object[] grant = {c, member, "GRANT", 1L, "Explicit reviewed operator", "Synthetic verified subject evidence", key, correlation};
+        var saved = operator.queryForMap(sql, grant);
+        assertThat(saved.get("version")).isEqualTo(2L);
+        assertThat(authenticatedGet(path, bearer).statusCode()).isEqualTo(200);
+        assertThat(operator.queryForMap(sql, grant).get("version")).isEqualTo(2L);
+        assertThatThrownBy(() -> operator.queryForMap(sql, c, member, "GRANT", 1L, "Changed", "Synthetic verified subject evidence", key, correlation))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> operator.queryForMap(sql, foreign, member, "GRANT", 2L, "Reviewed", "Evidence", UUID.randomUUID(), correlation))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.queryForMap(sql, grant)).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> operator.update("update identity_membership set permissions = array['identity.link.admin'] where id = ?", member))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        operator.queryForMap(sql, c, member, "REVOKE", 2L, "Reviewed revocation", "Evidence", UUID.randomUUID(), correlation);
+        assertThat(authenticatedGet(path, bearer).statusCode()).isEqualTo(403);
+        assertThat(operator.queryForMap(sql, grant).get("version")).isEqualTo(2L);
+        assertThat((String[]) owner.queryForObject("select permissions from identity_membership where id = ?", java.sql.Array.class, member).getArray())
+                .containsExactly("identity.admin");
+        assertThat(owner.queryForObject("select count(*) from identity_employee_link_authority_audit where membership_id = ?", Integer.class, member)).isEqualTo(2);
+        assertThatThrownBy(() -> operator.update("delete from identity_employee_link_authority_audit where membership_id = ?", member))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+    }
+
+    @Test void linkAuthorityAuditFailureRollsBackAndStaleVersionsRejectConcurrentGrant() throws Exception {
+        var operator = new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(), "membership_operator", "synthetic-only"));
+        UUID c = company(); UUID member = membership(subject(), c, "ACTIVE", "employee.self.read");
+        String sql = "select * from public.provision_employee_link_authority(?,?,?,?::bigint,?,?,?,?)";
+        owner.execute("create function reject_link_authority_audit() returns trigger language plpgsql as $$ begin raise exception 'synthetic authority audit outage'; end $$");
+        owner.execute("create trigger reject_link_authority_audit before insert on identity_employee_link_authority_audit for each row execute function reject_link_authority_audit()");
+        try {
+            assertThatThrownBy(() -> operator.queryForMap(sql, c, member, "GRANT", 1L, "Reviewed", "Evidence", UUID.randomUUID(), UUID.randomUUID()))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(owner.queryForObject("select version from identity_membership where id = ?", Long.class, member)).isEqualTo(1L);
+        } finally {
+            owner.execute("drop trigger reject_link_authority_audit on identity_employee_link_authority_audit");
+            owner.execute("drop function reject_link_authority_audit()");
+        }
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Boolean> attempt = () -> {
+                try { operator.queryForMap(sql, c, member, "GRANT", 1L, "Reviewed", "Evidence", UUID.randomUUID(), UUID.randomUUID()); return true; }
+                catch (org.springframework.dao.DataAccessException stale) { return false; }
+            };
+            var first = executor.submit(attempt); var second = executor.submit(attempt);
+            assertThat(java.util.List.of(first.get(), second.get())).containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(owner.queryForObject("select count(*) from identity_employee_link_authority_audit where membership_id = ?", Integer.class, member)).isEqualTo(1);
+    }
+
+    @Test void administratorLinksRelinksRevokesAndOwnResolutionUsesCurrentState() throws Exception {
+        UUID c = company(); String admin = subject(); String employee = subject();
+        membership(admin, c, "ACTIVE", "identity.link.admin");
+        UUID member = membership(employee, c, "ACTIVE", "employee.self.read");
+        var first = employeeEpisode(c, "EMP-LINK-1"); var second = employeeEpisode(c, "EMP-LINK-2");
+        String path = linkPath(c, member); String own = "/api/v1/companies/" + c + "/my-employee-link";
+        String oldSession = token(employee); String adminToken = token(admin);
+        assertThat(authenticatedGet(own, oldSession).statusCode()).isEqualTo(404);
+        assertThat(authenticatedGet(path, adminToken).body()).contains("UNLINKED");
+        String body = linkRequest("LINK", first.employeeId(), 0, 1, UUID.randomUUID());
+        var saved = authenticatedPost(path + "/changes", adminToken, body);
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(json(saved.body()).path("version").asLong()).isEqualTo(1);
+        assertThat(saved.headers().firstValue("Cache-Control")).hasValue("no-store");
+        assertThat(authenticatedPost(path + "/changes", adminToken, body).body()).isEqualTo(saved.body());
+        var ownResponse = authenticatedGet(own, oldSession);
+        assertThat(ownResponse.statusCode()).isEqualTo(200);
+        assertThat(json(ownResponse.body()).size()).isEqualTo(2);
+        assertThat(ownResponse.body()).contains(first.employeeId().toString()).doesNotContain("Synthetic Employee", "reason", "SYNTHETIC-VERIFICATION");
+        String relink = linkRequest("RELINK", second.employeeId(), 1, 1, UUID.randomUUID());
+        assertThat(authenticatedPost(path + "/changes", adminToken, relink).statusCode()).isEqualTo(200);
+        assertThat(authenticatedGet(own, oldSession).body()).contains(second.employeeId().toString()).doesNotContain(first.employeeId().toString());
+        var audit = owner.queryForMap("select previous_employee_id, employee_id, actor_subject, membership_version, verification_evidence_reference from employment_account_link_audit where membership_id = ? and version = 2", member);
+        assertThat(audit.get("previous_employee_id")).isEqualTo(first.employeeId());
+        assertThat(audit.get("employee_id")).isEqualTo(second.employeeId());
+        assertThat(audit.get("actor_subject")).isEqualTo(admin);
+        assertThat(authenticatedPost(path + "/changes", adminToken, body).body()).isEqualTo(saved.body());
+        assertThat(authenticatedPost(path + "/changes", adminToken, body.replace(first.employeeId().toString(), second.employeeId().toString())).statusCode()).isEqualTo(409);
+        assertThat(authenticatedPost(path + "/changes", adminToken, linkRequest("REVOKE", null, 2, 1, UUID.randomUUID())).statusCode()).isEqualTo(200);
+        assertThat(authenticatedGet(own, oldSession).statusCode()).isEqualTo(404);
+        assertThat(authenticatedGet(path, adminToken).body()).contains("REVOKED", second.employeeId().toString());
+        assertThat(owner.queryForObject("select count(*) from employment_account_link_audit where membership_id = ?", Integer.class, member)).isEqualTo(3);
+        assertThat((String[]) owner.queryForObject("select permissions from identity_membership where id = ?", java.sql.Array.class, member).getArray()).containsExactly("employee.self.read");
+        assertThat(authenticatedGet("/api/v1/companies/" + c + "/employees/" + first.employeeId(), adminToken).statusCode()).isEqualTo(403);
+    }
+
+    @Test void linkingRejectsUnauthorizedSelfForeignMalformedAndStaleTargets() throws Exception {
+        UUID a = company(); UUID b = company(); String admin = subject(); String hr = subject(); String employee = subject();
+        UUID adminMember = membership(admin, a, "ACTIVE", "identity.link.admin");
+        membership(hr, a, "ACTIVE", "employee.write");
+        UUID member = membership(employee, a, "ACTIVE", "employee.self.read");
+        UUID foreignMember = membership(subject(), b, "ACTIVE", "employee.self.read");
+        UUID revoked = membership(subject(), a, "REVOKED", "employee.self.read");
+        var e = employeeEpisode(a, "EMP-LINK-A"); var foreignEmployee = employeeEpisode(b, "EMP-LINK-B");
+        String path = linkPath(a, member) + "/changes"; String body = linkRequest("LINK", e.employeeId(), 0, 1, UUID.randomUUID());
+        assertThat(authenticatedPost(path, "invalid-token", body).statusCode()).isEqualTo(401);
+        assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(path, token(employee), body).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(linkPath(a, adminMember) + "/changes", token(admin), body).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(linkPath(a, foreignMember) + "/changes", token(admin), body).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(path, token(admin), body.replace(e.employeeId().toString(), foreignEmployee.employeeId().toString())).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(linkPath(a, UUID.randomUUID()) + "/changes", token(admin), body).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(linkPath(a, revoked) + "/changes", token(admin), body).statusCode()).isEqualTo(409);
+        for (String invalid : List.of(body.replace("\"confirm\":true", "\"confirm\":false"), body.replace("LINK", "UNKNOWN"),
+                body.replace("\"reason\":", "\"subject\":\"spoofed\",\"reason\":"),
+                body.replace(e.employeeId().toString(), "not-a-uuid"), body.replace("Reviewed synthetic identity", " "))) {
+            assertThat(authenticatedPost(path, token(admin), invalid).statusCode()).isEqualTo(400);
+        }
+        assertThat(authenticatedPost(path, token(admin), linkRequest("LINK", e.employeeId(), 0, 2, UUID.randomUUID())).statusCode()).isEqualTo(409);
+        assertThat(authenticatedPost(path, token(admin), body).statusCode()).isEqualTo(200);
+        assertThat(authenticatedPost(path, token(admin), linkRequest("REVOKE", null, 0, 1, UUID.randomUUID())).statusCode()).isEqualTo(409);
+        assertThat(authenticatedGet("/api/v1/companies/" + a + "/my-employee-link?subject=spoofed", token(hr)).statusCode()).isEqualTo(404);
+        owner.update("update identity_membership set status = 'REVOKED', version = version + 1 where id = ?", member);
+        assertThat(authenticatedGet("/api/v1/companies/" + a + "/my-employee-link", token(employee)).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(path, token(admin), linkRequest("REVOKE", null, 1, 2, UUID.randomUUID())).statusCode()).isEqualTo(200);
+        owner.update("update identity_membership set status = 'REVOKED' where id = ?", adminMember);
+        assertThat(authenticatedPost(path, token(admin), body).statusCode()).isEqualTo(403);
+    }
+
+    @Test void linkingRequiresProviderVerificationAndExactRetrySurvivesProviderOutage() throws Exception {
+        UUID c = company(); String admin = subject(); membership(admin, c, "ACTIVE", "identity.link.admin");
+        UUID member = membership(subject(), c, "ACTIVE", "employee.self.read");
+        UUID missingAccount = membership("not-found", c, "ACTIVE", "employee.self.read");
+        var e = employeeEpisode(c, "EMP-PROVIDER-LINK"); String path = linkPath(c, member) + "/changes";
+        String body = linkRequest("LINK", e.employeeId(), 0, 1, UUID.randomUUID());
+        assertThat(authenticatedPost(linkPath(c, missingAccount) + "/changes", token(admin), body).statusCode()).isEqualTo(404);
+        IDENTITY_PROVIDER_UNAVAILABLE.set(true);
+        try {
+            assertThat(authenticatedPost(path, token(admin), body).statusCode()).isEqualTo(503);
+            assertThat(owner.queryForObject("select count(*) from employment_account_link where company_id = ?", Integer.class, c)).isZero();
+        } finally { IDENTITY_PROVIDER_UNAVAILABLE.set(false); }
+        var saved = authenticatedPost(path, token(admin), body);
+        assertThat(saved.statusCode()).isEqualTo(200);
+        IDENTITY_PROVIDER_UNAVAILABLE.set(true);
+        try { assertThat(authenticatedPost(path, token(admin), body).body()).isEqualTo(saved.body()); }
+        finally { IDENTITY_PROVIDER_UNAVAILABLE.set(false); }
+    }
+
+    @Test void linkAuditRollbackAndConcurrentUniquenessAreAtomic() throws Exception {
+        UUID c = company(); String admin = subject(); membership(admin, c, "ACTIVE", "identity.link.admin");
+        UUID member = membership(subject(), c, "ACTIVE", "employee.self.read");
+        UUID secondMember = membership(subject(), c, "ACTIVE", "employee.self.read");
+        var e = employeeEpisode(c, "EMP-LINK-RACE"); String path = linkPath(c, member) + "/changes"; String bearer = token(admin);
+        String first = linkRequest("LINK", e.employeeId(), 0, 1, UUID.randomUUID());
+        owner.execute("create function reject_link_audit() returns trigger language plpgsql as $$ begin raise exception 'synthetic link audit outage'; end $$");
+        owner.execute("create trigger reject_link_audit before insert on employment_account_link_audit for each row execute function reject_link_audit()");
+        try {
+            assertThat(authenticatedPost(path, bearer, first).statusCode()).isEqualTo(500);
+            assertThat(owner.queryForObject("select count(*) from employment_account_link where company_id = ?", Integer.class, c)).isZero();
+        } finally { owner.execute("drop trigger reject_link_audit on employment_account_link_audit"); owner.execute("drop function reject_link_audit()"); }
+        var same = concurrentPosts(path, bearer, first, first);
+        assertThat(same).extracting(HttpResponse::statusCode).containsExactly(200, 200);
+        assertThat(same.get(0).body()).isEqualTo(same.get(1).body());
+        assertThat(authenticatedPost(linkPath(c, secondMember) + "/changes", bearer, linkRequest("LINK", e.employeeId(), 0, 1, UUID.randomUUID())).statusCode()).isEqualTo(409);
+        var next = employeeEpisode(c, "EMP-LINK-NEXT");
+        var race = concurrentPosts(path, bearer, linkRequest("RELINK", next.employeeId(), 1, 1, UUID.randomUUID()), linkRequest("REVOKE", null, 1, 1, UUID.randomUUID()));
+        assertThat(race).extracting(HttpResponse::statusCode).containsExactlyInAnyOrder(200, 409);
+        assertThat(owner.queryForObject("select count(*) from employment_account_link_audit where company_id = ?", Integer.class, c)).isEqualTo(2);
+    }
+
+    @Test void linkRuntimePoliciesHideForeignHistoryAndRejectForgedScope() throws Exception {
+        UUID a = company(); UUID b = company(); String admin = subject(); String employee = subject();
+        membership(admin, a, "ACTIVE", "identity.link.admin"); membership(admin, b, "ACTIVE", "identity.link.admin");
+        UUID member = membership(employee, a, "ACTIVE", "employee.self.read");
+        var e = employeeEpisode(a, "EMP-LINK-RLS");
+        assertThat(authenticatedPost(linkPath(a, member) + "/changes", token(admin), linkRequest("LINK", e.employeeId(), 0, 1, UUID.randomUUID())).statusCode()).isEqualTo(200);
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        tx.executeWithoutResult(status -> {
+            assertThat(jdbc.queryForObject("select count(*) from employment_account_link", Integer.class)).isZero();
+            scope.apply(jdbc, admin, b);
+            assertThat(jdbc.queryForObject("select count(*) from employment_account_link", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from employment_account_link_audit", Integer.class)).isZero();
+            scope.apply(jdbc, employee, a);
+            assertThat(jdbc.queryForObject("select count(*) from employment_account_link where membership_id = ?", Integer.class, member)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from employment_account_link_audit", Integer.class)).isZero();
+            jdbc.queryForObject("select set_config('olarize.subject', ?, true)", String.class, admin);
+            assertThat(jdbc.queryForObject("select count(*) from employment_account_link", Integer.class)).isZero();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from employment_account_link", Integer.class)).isZero();
+        assertThatThrownBy(() -> jdbc.update("update employment_account_link_audit set reason = 'tampered' where membership_id = ?", member))
                 .isInstanceOf(org.springframework.dao.DataAccessException.class);
     }
 

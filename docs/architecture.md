@@ -91,3 +91,7 @@ EMP-003 uses `EmployeeDirectoryController`, separate request/response DTOs and `
 ## Employee correction boundary
 
 EMP-007 uses `CorrectEmployeeService` and a focused JPA persistence port for optimistic employee/episode updates plus immutable `EmployeeVersionJpaEntity` audit/source snapshots. A separate `EmployeeJobJpaEntity` projection supplies dated minimal directory facts without exposing correction reasons/history. Composite foreign keys and RLS preserve company/episode scope. Equal-key transaction serialization is the documented native advisory-lock exception; CRUD uses JPA. Name/reference/contact corrections apply administratively; job changes use effective dates. Existing source versions and contract facts are retained. See [employee corrections](employee-corrections.md).
+
+### Verified employee account links
+
+Employment owns the account-link aggregate and immutable link audit, accessed through JPA repositories and dedicated DTO mappers. Identity exposes a narrow public port for scoped membership metadata, locking and subject verification; employment does not depend on identity internals. PostgreSQL SECURITY DEFINER helpers perform membership locks and employee-existence checks without granting the link administrator HR-record access. Helpers use signed company scope and the existing restricted identity function owner. [Operator details and API](employee-account-links.md).

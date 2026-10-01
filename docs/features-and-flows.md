@@ -370,3 +370,24 @@ Verify via `./scripts/verify-backend.sh`; correction tests cover effective dates
 Verified 2026-10-01: 127 full-suite tests passed; final date-boundary correction passed 47 focused tests. Independent review found no actionable issues. V12/V908 and synthetic baselines were applied to persistent local PostgreSQL; generated Swagger contract passed the local smoke check. Jira completion remains pending UI acceptance.
 
 Correction retry timestamps use PostgreSQL microsecond precision for both the first response and persisted retries. A deterministic PostgreSQL regression supplies a nanosecond instant and verifies identical initial/replayed outcomes; existing HTTP exact-response and concurrent retry assertions remain in place. Full verification passed 128 tests with no failures/errors/skips on 2026-10-01; focused independent review found no actionable issues.
+
+## Verified account link flow (EMP-011 / OLARIZE-8 backend)
+
+```mermaid
+sequenceDiagram
+    actor Admin as Dedicated identity link admin
+    participant API as Link API
+    participant Identity as Identity verification
+    participant DB as Scoped PostgreSQL
+    actor Member as Authenticated member
+    Admin->>API: Inspect link; confirm action, versions, reason and evidence
+    API->>Identity: Verify exact account subject for LINK/RELINK
+    API->>DB: Lock memberships; check current authority and scope
+    API->>DB: Commit versioned link and immutable audit atomically
+    API-->>Admin: Link metadata or original retry receipt
+    Member->>API: GET my-employee-link
+    API->>DB: Resolve current active own link
+    API-->>Member: Company and employee IDs only
+```
+
+Revocation and replacement apply to existing tokens on the next request. Links grant no HR access. See [employee account links](employee-account-links.md) for persistent local Swagger calls, provider setup, failures and operator boundaries. All 138 backend tests passed on 2026-10-01, including restricted PostgreSQL concurrency, retries, rollback, current own resolution and local OpenAPI/seeds. Accessible administration UI remains separate.
