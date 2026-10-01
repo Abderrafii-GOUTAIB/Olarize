@@ -14,6 +14,7 @@ import com.olarize.employment.infrastructure.out.persistence.repository.Employee
 import com.olarize.employment.infrastructure.out.persistence.repository.EmployeeVersionJpaRepository;
 import com.olarize.employment.infrastructure.out.persistence.repository.EmploymentEpisodeJpaRepository;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,6 +51,9 @@ class EmployeeCorrectionPersistenceAdapter implements EmployeeCorrectionPort {
     @Override public Result correct(UUID companyId, UUID employeeId, UUID episodeId, long version,
             long episodeVersion, EmployeeCorrection correction, String actor, UUID key, String hash,
             String correlationId, Instant time) {
+        // PostgreSQL timestamps store microseconds. Normalize before building the initial
+        // response so an exact retry loaded from persistence returns the identical instant.
+        time = time.truncatedTo(ChronoUnit.MICROS);
         var employee = employees.findByIdAndCompanyId(employeeId, companyId).orElseThrow(EmployeeNotFound::new);
         var episode = episodes.findByIdAndEmployeeIdAndCompanyId(episodeId, employeeId, companyId).orElseThrow(EmployeeNotFound::new);
         if (employee.getVersion() != version || episode.getVersion() != episodeVersion) throw new EmployeeCorrectionConflict();

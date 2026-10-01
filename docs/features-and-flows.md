@@ -368,3 +368,5 @@ HR submits one explicit correction for an employee/episode with current versions
 Verify via `./scripts/verify-backend.sh`; correction tests cover effective dates, immutable source preservation, invalid/denied/foreign writes, audit rollback, stale/duplicate/concurrent writes and restricted PostgreSQL scope. Accessible UI and future reporting/payroll integration remain pending.
 
 Verified 2026-10-01: 127 full-suite tests passed; final date-boundary correction passed 47 focused tests. Independent review found no actionable issues. V12/V908 and synthetic baselines were applied to persistent local PostgreSQL; generated Swagger contract passed the local smoke check. Jira completion remains pending UI acceptance.
+
+Correction retry timestamps use PostgreSQL microsecond precision for both the first response and persisted retries. A deterministic PostgreSQL regression supplies a nanosecond instant and verifies identical initial/replayed outcomes; existing HTTP exact-response and concurrent retry assertions remain in place. Full verification passed 128 tests with no failures/errors/skips on 2026-10-01; focused independent review found no actionable issues.

@@ -119,6 +119,8 @@ class CompanyContextIntegrationTests {
 
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+    @Autowired com.olarize.employment.application.port.out.EmployeeCorrectionPort employeeCorrections;
     @Autowired com.olarize.platform.api.DatabaseScopeSigner scope;
     @Autowired com.olarize.identity.application.port.in.CompanyAccessUseCase access;
     @Autowired com.olarize.identity.application.port.out.MembershipReaderPort reader;
@@ -608,6 +610,31 @@ class CompanyContextIntegrationTests {
         var overlap = authenticatedPost(path, bearer, correctionRequest(UUID.randomUUID(), 2, "EMP-START", "Correct", "2025-11-01", "2026-02-01", "Analyst")
                 .replace("\"expectedEpisodeVersion\":1", "\"expectedEpisodeVersion\":2"));
         assertThat(overlap.body()).contains("OTHER_EPISODE");
+    }
+
+    @Test void employeeCorrectionFirstResultMatchesPersistedRetryAtMicrosecondPrecision() {
+        UUID c = company(); String hr = subject(); membership(hr, c, "ACTIVE", "employee.write");
+        var e = employeeEpisode(c, "EMP-PRECISION");
+        UUID key = UUID.randomUUID();
+        var input = new com.olarize.employment.domain.model.EmployeeCorrection(
+                com.olarize.employment.domain.model.EmployeeCreation.of("EMP-PRECISION", "Synthetic Employee",
+                        java.time.LocalDate.parse("2026-01-01"), null, null, null, null, null),
+                java.time.LocalDate.parse("2026-02-01"), "Reviewed synthetic timestamp regression");
+        Instant nanoseconds = Instant.parse("2026-10-01T15:49:08.123456789Z");
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        var first = tx.execute(status -> {
+            scope.apply(jdbc, hr, c);
+            return employeeCorrections.correct(c, e.employeeId(), e.episodeId(), 1, 1,
+                    input, hr, key, "a".repeat(64), "precision-test", nanoseconds);
+        });
+        var retry = tx.execute(status -> {
+            scope.apply(jdbc, hr, c);
+            return employeeCorrections.findRetry(c, hr, key).orElseThrow().result();
+        });
+        assertThat(first.recordedAt()).isEqualTo(Instant.parse("2026-10-01T15:49:08.123456Z"));
+        assertThat(retry).isEqualTo(first);
+        assertThat(owner.queryForObject("select recorded_at from employment_employee where id = ?", java.sql.Timestamp.class,
+                e.employeeId()).toInstant()).isEqualTo(first.recordedAt());
     }
 
     @Test void employeeCorrectionAuditFailureRollsBackAndConcurrencyIsSafe() throws Exception {

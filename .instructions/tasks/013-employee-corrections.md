@@ -36,3 +36,7 @@ Persistent local smoke: packaged backend started with local profile on an epheme
 ## Completion notes
 
 The authorized backend slice is complete with immutable sources/audit, scoped optimistic corrections, exact retries, contact/date checks, dependent-fact conflicts and dated minimal directory jobs. Review found no actionable issues. UI and production prerequisites remain pending; reporting/payroll integration belongs to future modules. Jira story is not marked complete by this backend-only slice. The user authorized committing the reviewed backend slice on feature/OLARIZE-7. The project post-commit hook publishes its ticket branch and PR into develop; UI acceptance remains pending.
+
+## CI timestamp precision correction
+
+CI exposed nanosecond first-response timestamps differing from PostgreSQL microsecond retry timestamps. Normalize the mutation timestamp to microseconds at the persistence adapter before storing facts and building the initial result. Keep exact HTTP retry assertions and add a deterministic PostgreSQL nanosecond regression. Full `./scripts/verify-backend.sh` passed 128 tests, zero failures/errors/skips on 2026-10-01. The independent reviewer inspected the fix against bbbe7e2 and actual log/Surefire evidence, confirmed the deterministic regression fails on old behavior, and returned no actionable P0–P3 findings. No additional check required.
