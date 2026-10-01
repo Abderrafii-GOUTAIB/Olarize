@@ -7,5 +7,7 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface EmploymentEpisodeJpaRepository extends JpaRepository<EmploymentEpisodeJpaEntity, UUID> {
+    java.util.List<EmploymentEpisodeJpaEntity> findAllByEmployeeIdAndCompanyId(UUID employeeId, UUID companyId);
+    Optional<EmploymentEpisodeJpaEntity> findByIdAndEmployeeIdAndCompanyId(UUID id, UUID employeeId, UUID companyId);
     Optional<EmploymentEpisodeJpaEntity> findByEmployeeIdAndCompanyId(UUID employeeId, UUID companyId);
 }

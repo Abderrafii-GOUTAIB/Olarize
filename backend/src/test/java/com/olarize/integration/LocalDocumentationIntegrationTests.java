@@ -58,6 +58,21 @@ class LocalDocumentationIntegrationTests {
             HttpResponse.BodyHandlers.ofString());
     }
 
+    @Test void localCorrectionSwaggerAndPersistentBaselinesAreAvailable() throws Exception {
+        var response = get("/v3/api-docs");
+        assertThat(response.statusCode()).isEqualTo(200);
+        var operation = mapper.readTree(response.body()).path("paths")
+                .path("/api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/corrections").path("post");
+        assertThat(operation.path("summary").asText()).contains("Correct employee");
+        assertThat(operation.path("responses").path("200").path("content").path("application/json").path("schema").path("$ref").asText())
+                .contains("CorrectedEmployeeResponseDto");
+        var example = mapper.readTree(response.body()).path("components").path("schemas").path("CorrectEmployeeRequestDto").path("example");
+        assertThat(example.path("confirm").asBoolean()).isTrue();
+        assertThat(example.path("expectedVersion").asInt()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from employment_employee_version where employee_id = 'c0000000-0000-4000-8000-000000000070' and version = 1", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from employment_job_version where episode_id = 'c0000000-0000-4000-8000-000000000071' and job_title = 'HR Coordinator'", Integer.class)).isEqualTo(1);
+    }
+
     @Test void localOpenApiListsOnlyTheEndpointAndBearerScheme() throws Exception {
         var response = get("/v3/api-docs");
         assertThat(response.statusCode()).isEqualTo(200);

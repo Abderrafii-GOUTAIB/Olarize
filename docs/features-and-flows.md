@@ -52,6 +52,11 @@ flowchart TD
     CreateEmployee -->|current company membership + signed scope| DB
     CreateEmployee -->|one transaction| EmployeeRecord
     EmployeeRecord --> DB
+    HR -->|current versions + confirmed work facts + reason + effective date| CorrectionAPI[POST employee episode corrections]
+    CorrectionAPI -->|signed scope; optimistic versions; atomic audit| EmployeeVersions[Immutable employee source versions]
+    EmployeeVersions --> DB
+    CorrectionAPI --> JobVersions[Dated minimal job projection]
+    JobVersions --> DB
     ContractHR -->|confirmed supplied facts + retry UUID| ContractAPI
     ContractAPI -->|current contract permission + signed scope| DB
     ContractAPI -->|append version, audit and receipt atomically| ContractVersions
@@ -355,3 +360,11 @@ flowchart TD
 Swagger: POST `/companies/{companyId}/assistant/conversations`, copy its real conversationId, then POST `/{conversationId}/contract-expiry-requests` with question `Which contracts expire in October 2026?`. Use `olarize-demo-admin` and company `c0000000-0000-4000-8000-000000000001`. Persistent local V907 gives Yasmine a synthetic contract ending 2026-10-15. No startup conversation is shared between users. See [assistant expiry guide](assistant-contract-expiry.md) for multilingual examples, limits and fallback.
 
 Verification: full backend checks passed 117 tests; the subsequent direct ownership/RLS regression passed 32 focused tests. Independent review found no actionable issues. These are deterministic provider evaluations; frontend, live browser login, general language understanding and live-provider acceptance remain separate.
+
+## Employee corrections — OLARIZE-7 / EMP-007 backend
+
+HR submits one explicit correction for an employee/episode with current versions, a reason and job effective date. Immutable history and safe retries preserve prior evidence. Start conflicts identify dependent job/episode/last-day facts. Directory/detail select job facts by asOf; restricted reasons/history are hidden from directory readers. Existing contracts and source snapshots retain their dates/facts. See [employee corrections](employee-corrections.md) for persistent local Swagger calls, fields and errors.
+
+Verify via `./scripts/verify-backend.sh`; correction tests cover effective dates, immutable source preservation, invalid/denied/foreign writes, audit rollback, stale/duplicate/concurrent writes and restricted PostgreSQL scope. Accessible UI and future reporting/payroll integration remain pending.
+
+Verified 2026-10-01: 127 full-suite tests passed; final date-boundary correction passed 47 focused tests. Independent review found no actionable issues. V12/V908 and synthetic baselines were applied to persistent local PostgreSQL; generated Swagger contract passed the local smoke check. Jira completion remains pending UI acceptance.

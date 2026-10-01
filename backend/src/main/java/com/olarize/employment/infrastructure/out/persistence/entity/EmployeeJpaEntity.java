@@ -1,5 +1,9 @@
 package com.olarize.employment.infrastructure.out.persistence.entity;
 
+import com.olarize.employment.domain.model.EmployeeCreation;
+import jakarta.persistence.Version;
+import org.hibernate.annotations.DynamicUpdate;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -8,6 +12,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
+@DynamicUpdate
 @Table(name = "employment_employee")
 public class EmployeeJpaEntity {
     @Id private UUID id;
@@ -20,7 +25,7 @@ public class EmployeeJpaEntity {
     private String site;
     @Column(name = "work_email") private String workEmail;
     @Column(name = "work_phone") private String workPhone;
-    private long version;
+    @Version private long version;
     @Column(name = "recorded_at", nullable = false) private Instant recordedAt;
 
     protected EmployeeJpaEntity() { }
@@ -40,6 +45,15 @@ public class EmployeeJpaEntity {
         this.workPhone = workPhone;
         this.version = 1;
         this.recordedAt = recordedAt;
+    }
+
+    public void correct(EmployeeCreation facts, Instant time) {
+        reference = facts.reference();
+        normalizedReference = facts.normalizedReference();
+        name = facts.name();
+        workEmail = facts.workEmail();
+        workPhone = facts.workPhone();
+        recordedAt = time;
     }
 
     public UUID getId() { return id; }

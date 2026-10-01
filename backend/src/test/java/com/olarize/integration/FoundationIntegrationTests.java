@@ -114,8 +114,8 @@ class FoundationIntegrationTests {
             .POST(HttpRequest.BodyPublishers.ofString("{}"))
             .header("Content-Type", "application/json").build();
         var response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        assertThat(response.statusCode()).isEqualTo(403);
-        assertThat(response.body()).contains("HTTP_403", "requestId");
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.body()).contains("HTTP_401", "requestId");
     }
 
     String token(String variation) throws Exception {

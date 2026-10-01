@@ -51,10 +51,14 @@ class SecurityConfiguration {
                         "/api/v1/companies/*/membership-change-previews",
                         "/api/v1/companies/*/membership-changes/confirm",
                         "/api/v1/companies/*/employees",
+                        "/api/v1/companies/*/employees/*/episodes/*/corrections",
                         "/api/v1/companies/*/employees/*/episodes/*/contracts",
                         "/api/v1/companies/*/employees/*/episodes/*/contracts/*/corrections")
                     .hasAuthority("SCOPE_profile.read")
                 .anyRequest().denyAll())
+            // This chain accepts bearer tokens only and creates no cookie/session authentication.
+            // Missing tokens on POST must reach the same 401 entry point as GET.
+            .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .oauth2ResourceServer(oauth -> oauth
                 .jwt(jwt -> jwt.decoder(decoder))

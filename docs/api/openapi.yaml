@@ -565,6 +565,46 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /api/v1/companies/{companyId}/employees/{employeeId}/episodes/{episodeId}/corrections:
+    post:
+      operationId: correctEmployee
+      summary: Correct employee work facts with current versions and a reason
+      description: Requires profile.read and current company employee.write. Explicit confirmed full minimum-fact replacement for stable employee/episode IDs. Immutable audit/source versions and dated job projections commit atomically. No contract date or downstream snapshot rewriting.
+      security:
+        - keycloak: [profile.read]
+      parameters:
+        - {name: companyId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: employeeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: episodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CorrectEmployeeRequestDto'}
+      responses:
+        '200':
+          description: New employee/source versions or original same-key retry outcome
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CorrectedEmployeeResponseDto'}
+        '400': {description: Invalid unknown or unconfirmed input}
+        '401': {description: Authentication required}
+        '403': {description: Current company employee.write required}
+        '404': {description: Employee or episode unavailable in this company}
+        '409':
+          description: Stale versions duplicate reference conflicting retry or dependent intervals
+          content:
+            application/problem+json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Problem'}
+                  - type: object
+                    properties:
+                      dependentFacts:
+                        type: array
+                        items: {type: string, enum: [JOB_INTERVAL, LAST_EMPLOYED_DAY, OTHER_EPISODE]}
+        '500': {description: Persistence or audit failure with full rollback}
+
 components:
   parameters:
     CompanyId:
@@ -1058,3 +1098,33 @@ components:
         detail: {type: string}
         code: {type: string}
         requestId: {type: string}
+    CorrectEmployeeRequestDto:
+      type: object
+      additionalProperties: false
+      required: [reference, name, startDate, effectiveDate, expectedVersion, expectedEpisodeVersion, reason, idempotencyKey, confirm]
+      properties:
+        reference: {type: string, minLength: 1, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 200}
+        startDate: {type: string, format: date}
+        jobTitle: {type: string, maxLength: 200, nullable: true}
+        department: {type: string, maxLength: 200, nullable: true}
+        site: {type: string, maxLength: 200, nullable: true}
+        workEmail: {type: string, format: email, maxLength: 254, nullable: true}
+        workPhone: {type: string, maxLength: 32, nullable: true}
+        effectiveDate: {type: string, format: date}
+        expectedVersion: {type: integer, format: int64, minimum: 1}
+        expectedEpisodeVersion: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+        idempotencyKey: {type: string, format: uuid}
+        confirm: {type: boolean, enum: [true]}
+    CorrectedEmployeeResponseDto:
+      type: object
+      required: [companyId, employeeId, episodeId, version, episodeVersion, effectiveDate, recordedAt]
+      properties:
+        companyId: {type: string, format: uuid}
+        employeeId: {type: string, format: uuid}
+        episodeId: {type: string, format: uuid}
+        version: {type: integer, format: int64}
+        episodeVersion: {type: integer, format: int64}
+        effectiveDate: {type: string, format: date}
+        recordedAt: {type: string, format: date-time}

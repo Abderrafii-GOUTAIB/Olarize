@@ -119,3 +119,9 @@ Verified on 2026-09-30 for OLARIZE-6 / EMP-003 directory/detail: full `./scripts
 OLARIZE-5 adds owned conversation and expiry-request POST APIs. Only local runs use the deterministic synthetic intent planner; other profiles report provider unavailable. Existing contract permissions and PostgreSQL scope apply. Local V907 persists a synthetic October 2026 contract, so the exact example `Which contracts expire in October 2026?` returns Yasmine. Create a fresh owned conversation first. See [assistant expiry testing](assistant-contract-expiry.md). This scope does not enable live AI or the frontend.
 
 Verified on 2026-09-30 for OLARIZE-5: full `./scripts/verify-backend.sh` passed 117 tests, zero failures/errors/skips. The subsequent `CompanyContextIntegrationTests` run passed 32 tests including direct conversation ownership and forged-context RLS checks. Independent review found no actionable findings. No live provider or browser-login claim is made.
+
+## Employee corrections
+
+OLARIZE-7 adds confirmed employee/episode factual corrections, immutable sources and dated job projections. Local-only V908 persists synthetic baselines; Swagger provides a correction example for Yasmine. See [employee corrections](employee-corrections.md) for exact calls and current version/retry behavior. This backend slice leaves UI acceptance pending.
+
+Verified on 2026-10-01 for OLARIZE-7: full backend suite passed 127 tests with no failures/errors/skips. After the start/job-date boundary fix, focused correction/company-context/local-Swagger verification passed 47 tests. Independent review found no actionable P0–P3 issues. Persistent local V12/V908 migrations and generated correction Swagger were checked; no browser-login claim is made.

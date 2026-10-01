@@ -147,6 +147,9 @@ class CompanyContextIntegrationTests {
         owner.execute("grant select on identity_membership to membership_runtime");
         owner.execute("grant select, insert on assistant_conversation to membership_runtime");
         owner.execute("grant select, insert on employment_employee, employment_episode, employment_creation_audit, employment_creation_request to membership_runtime");
+        owner.execute("grant update (reference, normalized_reference, name, work_email, work_phone, version, recorded_at) on employment_employee to membership_runtime");
+        owner.execute("grant update (start_date, version, recorded_at) on employment_episode to membership_runtime");
+        owner.execute("grant select, insert on employment_employee_version, employment_job_version to membership_runtime");
         owner.execute("grant execute on function public.olarize_can_write_employee(uuid) to membership_runtime");
         owner.execute("grant select, insert, update on employment_contract to membership_runtime");
         owner.execute("grant select, insert on employment_contract_version, employment_contract_request to membership_runtime");
@@ -176,6 +179,15 @@ class CompanyContextIntegrationTests {
     java.util.UUID membership(String subject, java.util.UUID company, String status, String permission) {
         var id = java.util.UUID.randomUUID();
         owner.update("insert into identity_membership(id,company_id,subject,permissions,status,version,created_at,updated_at) values (?,?,?,ARRAY[?],?,1,now(),now())", id, company, subject, permission, status);
+        return id;
+    }
+    UUID membership(String subject, UUID company, String status, String first, String... additional) {
+        UUID id = membership(subject, company, status, first);
+        var permissions = new java.util.ArrayList<String>();
+        permissions.add(first);
+        permissions.addAll(List.of(additional));
+        owner.update("update identity_membership set permissions = ?::text[] where id = ?",
+                "{" + String.join(",", permissions) + "}", id);
         return id;
     }
     String subject() { return "synthetic-" + java.util.UUID.randomUUID(); }
@@ -490,6 +502,181 @@ class CompanyContextIntegrationTests {
                 values (?, ?, ?, DATE '2026-01-01', 1, now())
                 """, episodeId, employeeId, companyId);
         return new EmployeeEpisode(employeeId, episodeId);
+    }
+
+    private String correctionPath(UUID companyId, EmployeeEpisode employee) {
+        return "/api/v1/companies/" + companyId + "/employees/" + employee.employeeId()
+                + "/episodes/" + employee.episodeId() + "/corrections";
+    }
+
+    private String correctionRequest(UUID key, long version, String reference, String name,
+            String start, String effective, String job) {
+        return """
+                {"reference":"%s","name":"%s","startDate":"%s","effectiveDate":"%s",
+                 "jobTitle":%s,"department":"Operations","workEmail":"work@demo.invalid",
+                 "expectedVersion":%d,"expectedEpisodeVersion":1,"reason":"Reviewed synthetic source",
+                 "idempotencyKey":"%s","confirm":true}
+                """.formatted(reference, name, start, effective, job == null ? "null" : "\"" + job + "\"", version, key);
+    }
+
+    @Test void employeeCorrectionsPreserveFactsAndSelectDatedJobs() throws Exception {
+        UUID companyId = company(); String hr = subject();
+        membership(hr, companyId, "ACTIVE", "employee.write", "employee.read", "contract.write");
+        var employee = employeeEpisode(companyId, "EMP-CORRECT");
+        String path = correctionPath(companyId, employee); String bearer = token(hr);
+        String first = correctionRequest(UUID.randomUUID(), 1, "0007", "سلمى", "2026-01-01", "2026-02-01", "Analyst");
+        var saved = authenticatedPost(path, bearer, first);
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(json(saved.body()).path("version").asLong()).isEqualTo(2);
+        assertThat(saved.headers().firstValue("Cache-Control")).hasValue("no-store");
+        assertThat(authenticatedPost(path, bearer, first).body()).isEqualTo(saved.body());
+        String second = correctionRequest(UUID.randomUUID(), 2, "0007", "سلمى", "2026-01-01", "2026-06-01", "Lead");
+        assertThat(authenticatedPost(path, bearer, second).statusCode()).isEqualTo(200);
+        String detail = "/api/v1/companies/" + companyId + "/employees/" + employee.employeeId();
+        assertThat(authenticatedGet(detail + "?asOf=2026-03-01", bearer).body()).contains("Analyst").doesNotContain("Lead");
+        assertThat(authenticatedGet(detail + "?asOf=2026-07-01", bearer).body()).contains("Lead");
+        assertThat(authenticatedGet(detail + "?asOf=2026-01-15", bearer).body()).doesNotContain("Analyst", "Lead");
+        // A later retroactive correction appends evidence; earlier source versions remain byte-for-byte unchanged.
+        var frozen = owner.queryForMap("select * from employment_employee_version where employee_id = ? and version = 2", employee.employeeId());
+        String retro = correctionRequest(UUID.randomUUID(), 3, "0007", "سلمى", "2026-01-01", "2026-02-01", "Senior Analyst");
+        assertThat(authenticatedPost(path, bearer, retro).statusCode()).isEqualTo(200);
+        assertThat(owner.queryForMap("select * from employment_employee_version where employee_id = ? and version = 2", employee.employeeId())).isEqualTo(frozen);
+        assertThat(authenticatedGet(detail + "?asOf=2026-03-01", bearer).body()).contains("Senior Analyst");
+        assertThat(authenticatedGet(detail + "?asOf=2026-07-01", bearer).body()).contains("Lead");
+        assertThat(authenticatedPost(path, bearer, first).body()).isEqualTo(saved.body());
+        assertThat(authenticatedPost(path, bearer, first.replace("سلمى", "Other")).statusCode()).isEqualTo(409);
+        assertThat(authenticatedPost(path, bearer, correctionRequest(UUID.randomUUID(), 1, "0007", "Stale", "2026-01-01", "2026-02-01", "Analyst")).statusCode()).isEqualTo(409);
+        assertThat(owner.queryForObject("select name from employment_employee where id = ?", String.class, employee.employeeId())).isEqualTo("سلمى");
+        assertThat(owner.queryForObject("select count(*) from employment_employee_version where employee_id = ?", Integer.class, employee.employeeId())).isEqualTo(4);
+        var audit = owner.queryForMap("select actor_subject, reason, correlation_id from employment_employee_version where employee_id = ? and version = 4", employee.employeeId());
+        assertThat(audit.get("actor_subject")).isEqualTo(hr);
+        assertThat(audit.get("reason")).isEqualTo("Reviewed synthetic source");
+        assertThat(audit.get("correlation_id")).isNotNull();
+    }
+
+    @Test void employeeCorrectionValidationPermissionsAndCrossCompanyIsolation() throws Exception {
+        UUID a = company(); UUID b = company(); String hr = subject(); String manager = subject();
+        membership(hr, a, "ACTIVE", "employee.write", "employee.read");
+        membership(hr, b, "ACTIVE", "employee.write");
+        membership(manager, a, "ACTIVE", "employee.direct-reports.read");
+        var employee = employeeEpisode(a, "EMP-A"); var duplicate = employeeEpisode(a, "EMP-DUP");
+        var foreign = employeeEpisode(b, "EMP-B");
+        String path = correctionPath(a, employee); String body = correctionRequest(UUID.randomUUID(), 1, "EMP-A", "Correct", "2026-01-01", "2026-02-01", "Analyst");
+        var unauth = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(unauth.statusCode()).isEqualTo(401);
+        assertThat(authenticatedPost(path, token(manager), body).statusCode()).isEqualTo(403);
+        assertThat(authenticatedPost(correctionPath(a, foreign), token(hr), body).statusCode()).isEqualTo(404);
+        assertThat(authenticatedPost(path.replace(employee.episodeId().toString(), foreign.episodeId().toString()), token(hr), body).statusCode()).isEqualTo(404);
+        for (String invalid : List.of(body.replace("\"confirm\":true", "\"confirm\":false"),
+                body.replace("Correct", " "), body.replace("2026-01-01", "2026-02-30"),
+                body.replace("work@demo.invalid", "not-email"), body.replace("\"reason\":", "\"salary\":100,\"reason\":"),
+                body.replace("\"reason\":", "\"departmentId\":\"" + b + "\",\"reason\":"),
+                body.replace("Correct", "x".repeat(201)), body.replace("\"reason\":", "\"workPhone\":\"abc123\",\"reason\":"))) {
+            var result = authenticatedPost(path, token(hr), invalid);
+            assertThat(result.statusCode()).as(result.body()).isEqualTo(400);
+            assertThat(result.body()).doesNotContain("not-email", "abc123");
+        }
+        assertThat(authenticatedPost(path, token(hr), body.replace("EMP-A", " emp-dup ")).statusCode()).isEqualTo(409);
+        assertThat(owner.queryForObject("select version from employment_employee where id = ?", Long.class, employee.employeeId())).isEqualTo(1);
+        assertThat(owner.queryForObject("select count(*) from employment_employee_version where employee_id = ?", Integer.class, employee.employeeId())).isZero();
+        assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(200);
+        owner.update("update identity_membership set status = 'REVOKED' where subject = ?", hr);
+        assertThat(authenticatedPost(path, token(hr), body).statusCode()).isEqualTo(403);
+    }
+
+    @Test void employeeStartCorrectionReportsConflictsAndPreservesContracts() throws Exception {
+        UUID c = company(); String hr = subject(); membership(hr, c, "ACTIVE", "employee.write", "employee.read", "contract.write");
+        var e = employeeEpisode(c, "EMP-START"); String path = correctionPath(c, e); String bearer = token(hr);
+        var contract = authenticatedPost(contractPath(c, e), bearer, createContractRequest(UUID.randomUUID(), "2026-12-31"));
+        assertThat(contract.statusCode()).isEqualTo(201);
+        String first = correctionRequest(UUID.randomUUID(), 1, "EMP-START", "Correct", "2025-12-01", "2026-02-01", "Analyst");
+        var saved = authenticatedPost(path, bearer, first);
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(json(saved.body()).path("episodeVersion").asLong()).isEqualTo(2);
+        var conflict = authenticatedPost(path, bearer, correctionRequest(UUID.randomUUID(), 2, "EMP-START", "Correct", "2026-03-01", "2026-04-01", "Lead")
+                .replace("\"expectedEpisodeVersion\":1", "\"expectedEpisodeVersion\":2"));
+        assertThat(conflict.statusCode()).isEqualTo(409);
+        assertThat(conflict.body()).contains("JOB_INTERVAL", "requestId");
+        assertThat(owner.queryForObject("select start_date::text from employment_contract_version where employee_id = ?", String.class, e.employeeId())).isEqualTo("2026-01-01");
+        owner.update("update employment_episode set last_employed_day = date '2026-05-01' where id = ?", e.episodeId());
+        var lastDay = authenticatedPost(path, bearer, correctionRequest(UUID.randomUUID(), 2, "EMP-START", "Correct", "2026-06-01", "2026-06-01", "Lead")
+                .replace("\"expectedEpisodeVersion\":1", "\"expectedEpisodeVersion\":2"));
+        assertThat(lastDay.body()).contains("LAST_EMPLOYED_DAY");
+        UUID other = UUID.randomUUID();
+        owner.update("insert into employment_episode(id, employee_id, company_id, start_date, last_employed_day, version, recorded_at) values(?,?,?,date '2025-01-01',date '2025-11-30',1,now())", other, e.employeeId(), c);
+        var overlap = authenticatedPost(path, bearer, correctionRequest(UUID.randomUUID(), 2, "EMP-START", "Correct", "2025-11-01", "2026-02-01", "Analyst")
+                .replace("\"expectedEpisodeVersion\":1", "\"expectedEpisodeVersion\":2"));
+        assertThat(overlap.body()).contains("OTHER_EPISODE");
+    }
+
+    @Test void employeeCorrectionAuditFailureRollsBackAndConcurrencyIsSafe() throws Exception {
+        UUID c = company(); String hr = subject(); membership(hr, c, "ACTIVE", "employee.write");
+        var e = employeeEpisode(c, "EMP-RACE"); String path = correctionPath(c, e); String bearer = token(hr);
+        String first = correctionRequest(UUID.randomUUID(), 1, "EMP-RACE", "First", "2026-01-01", "2026-02-01", "Analyst");
+        owner.execute("create function reject_employee_correction() returns trigger language plpgsql as $$ begin if NEW.version > 1 then raise exception 'synthetic audit outage'; end if; return NEW; end $$");
+        owner.execute("create trigger reject_employee_correction before insert on employment_employee_version for each row execute function reject_employee_correction()");
+        try {
+            assertThat(authenticatedPost(path, bearer, first).statusCode()).isEqualTo(500);
+            assertThat(owner.queryForObject("select version from employment_employee where id = ?", Long.class, e.employeeId())).isEqualTo(1);
+            assertThat(owner.queryForObject("select count(*) from employment_employee_version where employee_id = ?", Integer.class, e.employeeId())).isZero();
+            assertThat(owner.queryForObject("select count(*) from employment_job_version where episode_id = ?", Integer.class, e.episodeId())).isZero();
+        } finally {
+            owner.execute("drop trigger reject_employee_correction on employment_employee_version");
+            owner.execute("drop function reject_employee_correction()");
+        }
+        var same = concurrentPosts(path, bearer, first, first);
+        assertThat(same).extracting(HttpResponse::statusCode).containsExactly(200, 200);
+        assertThat(same.get(0).body()).isEqualTo(same.get(1).body());
+        String nextA = correctionRequest(UUID.randomUUID(), 2, "EMP-RACE", "Next A", "2026-01-01", "2026-03-01", "Lead");
+        String nextB = correctionRequest(UUID.randomUUID(), 2, "EMP-RACE", "Next B", "2026-01-01", "2026-03-01", "Lead");
+        assertThat(concurrentPosts(path, bearer, nextA, nextB)).extracting(HttpResponse::statusCode).containsExactlyInAnyOrder(200, 409);
+        assertThat(owner.queryForObject("select version from employment_employee where id = ?", Long.class, e.employeeId())).isEqualTo(3);
+    }
+
+    @Test void employeeCreationRetryKeepsOriginalFactsAfterCorrection() throws Exception {
+        UUID c = company(); String hr = subject(); membership(hr, c, "ACTIVE", "employee.write", "employee.read");
+        String bearer = token(hr); String createPath = "/api/v1/companies/" + c + "/employees";
+        String body = employeeRequest("EMP-ORIGINAL", UUID.randomUUID(), "2026-01-01");
+        var original = authenticatedPost(createPath, bearer, body);
+        assertThat(original.statusCode()).isEqualTo(201);
+        var e = new EmployeeEpisode(UUID.fromString(json(original.body()).path("employeeId").asText()),
+                UUID.fromString(json(original.body()).path("episodeId").asText()));
+        String correction = correctionRequest(UUID.randomUUID(), 1, "EMP-CHANGED", "Corrected Name", "2025-12-01", "2026-02-01", "Lead");
+        assertThat(authenticatedPost(correctionPath(c, e), bearer, correction).statusCode()).isEqualTo(200);
+        assertThat(authenticatedPost(createPath, bearer, body).body()).isEqualTo(original.body());
+        var earlyDetail = authenticatedGet(createPath + "/" + e.employeeId() + "?asOf=2025-12-15", bearer);
+        assertThat(earlyDetail.statusCode()).isEqualTo(200);
+        assertThat(earlyDetail.body()).doesNotContain("People Operations Specialist", "Operations", "Lead");
+        String nameOnly = correctionRequest(UUID.randomUUID(), 2, "EMP-CHANGED", "New Name", "2025-12-01", "2026-02-01", "Lead")
+                .replace("\"expectedEpisodeVersion\":1", "\"expectedEpisodeVersion\":2");
+        assertThat(authenticatedPost(correctionPath(c, e), bearer, nameOnly).statusCode()).isEqualTo(200);
+        assertThat(owner.queryForObject("select count(*) from employment_job_version where episode_id = ?", Integer.class, e.episodeId())).isEqualTo(2);
+        assertThat(authenticatedPost(createPath, bearer, body).body()).isEqualTo(original.body());
+    }
+
+    @Test void employeeCorrectionHistoryAndJobsEnforceRestrictedDatabaseScope() throws Exception {
+        UUID a = company(); UUID b = company(); String hr = subject(); String readerSubject = subject();
+        membership(hr, a, "ACTIVE", "employee.write"); membership(hr, b, "ACTIVE", "employee.write");
+        membership(readerSubject, a, "ACTIVE", "employee.read");
+        var e = employeeEpisode(a, "EMP-HISTORY");
+        assertThat(authenticatedPost(correctionPath(a, e), token(hr), correctionRequest(UUID.randomUUID(), 1, "EMP-HISTORY", "History", "2026-01-01", "2026-02-01", "Analyst")).statusCode()).isEqualTo(200);
+        var tx = new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+        tx.executeWithoutResult(status -> {
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee_version", Integer.class)).isZero();
+            scope.apply(jdbc, hr, a);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee_version where employee_id = ?", Integer.class, e.employeeId())).isEqualTo(2);
+            scope.apply(jdbc, hr, b);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee_version where employee_id = ?", Integer.class, e.employeeId())).isZero();
+            scope.apply(jdbc, readerSubject, a);
+            assertThat(jdbc.queryForObject("select count(*) from employment_employee_version", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from employment_job_version where episode_id = ?", Integer.class, e.episodeId())).isEqualTo(1);
+            jdbc.queryForObject("select set_config('olarize.subject', ?, true)", String.class, hr);
+            assertThat(jdbc.queryForObject("select count(*) from employment_job_version", Integer.class)).isZero();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from employment_job_version", Integer.class)).isZero();
+        assertThatThrownBy(() -> jdbc.update("update employment_employee_version set reason = 'Changed' where employee_id = ?", e.employeeId()))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
     }
 
     private String contractPath(UUID companyId, EmployeeEpisode employee) {
