@@ -1,5 +1,8 @@
 package com.olarize.employment.infrastructure.out.persistence.entity;
 
+import jakarta.persistence.Version;
+import org.hibernate.annotations.DynamicUpdate;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -9,6 +12,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
+@DynamicUpdate
 @Table(name = "employment_episode")
 public class EmploymentEpisodeJpaEntity {
     @Id private UUID id;
@@ -16,7 +20,7 @@ public class EmploymentEpisodeJpaEntity {
     @Column(name = "company_id", nullable = false) private UUID companyId;
     @Column(name = "start_date", nullable = false) private LocalDate startDate;
     @Column(name = "last_employed_day") private LocalDate lastEmployedDay;
-    private long version;
+    @Version private long version;
     @Column(name = "recorded_at", nullable = false) private Instant recordedAt;
 
     protected EmploymentEpisodeJpaEntity() { }
@@ -28,6 +32,11 @@ public class EmploymentEpisodeJpaEntity {
         this.startDate = startDate;
         this.version = 1;
         this.recordedAt = recordedAt;
+    }
+
+    public void correctStart(LocalDate startDate, Instant time) {
+        this.startDate = startDate;
+        this.recordedAt = time;
     }
 
     public UUID getId() { return id; }

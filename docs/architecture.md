@@ -87,3 +87,7 @@ EMP-003 uses `EmployeeDirectoryController`, separate request/response DTOs and `
 ## Contract expiry assistant backend boundary
 
 [ADR 006](decisions/006-contract-expiry-tool-backend.md) records the user-authorized OLARIZE-5 backend slice. The assistant uses an owned conversation JPA repository and a bounded, replaceable intent port. The local synthetic adapter receives a question only. The application validates allowlisted arguments, resolves Casablanca dates and invokes the public employment `ListExpiringContractsUseCase`. No assistant class uses employment infrastructure or HR persistence. Questions/results are not persisted or sent to an external provider. Web controllers, DTOs and mappers follow the same infrastructure layout. Frontend and live-model scope remain pending; see [assistant expiry](assistant-contract-expiry.md).
+
+## Employee correction boundary
+
+EMP-007 uses `CorrectEmployeeService` and a focused JPA persistence port for optimistic employee/episode updates plus immutable `EmployeeVersionJpaEntity` audit/source snapshots. A separate `EmployeeJobJpaEntity` projection supplies dated minimal directory facts without exposing correction reasons/history. Composite foreign keys and RLS preserve company/episode scope. Equal-key transaction serialization is the documented native advisory-lock exception; CRUD uses JPA. Name/reference/contact corrections apply administratively; job changes use effective dates. Existing source versions and contract facts are retained. See [employee corrections](employee-corrections.md).

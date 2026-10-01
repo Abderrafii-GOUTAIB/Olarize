@@ -1,5 +1,10 @@
 package com.olarize.employment.infrastructure.out.persistence.adapter;
 
+import com.olarize.employment.infrastructure.out.persistence.entity.EmployeeJobJpaEntity;
+import com.olarize.employment.infrastructure.out.persistence.mapper.EmployeeCorrectionPersistenceMapper;
+import com.olarize.employment.infrastructure.out.persistence.repository.EmployeeJobJpaRepository;
+import com.olarize.employment.infrastructure.out.persistence.repository.EmployeeVersionJpaRepository;
+
 import com.olarize.employment.infrastructure.out.persistence.entity.EmployeeCreationAuditJpaEntity;
 import com.olarize.employment.infrastructure.out.persistence.entity.EmployeeCreationRequestJpaEntity;
 import com.olarize.employment.infrastructure.out.persistence.entity.EmployeeJpaEntity;
@@ -25,15 +30,21 @@ class EmployeeCreationPersistenceAdapter implements EmployeeCreationPort {
     private final EmployeeCreationAuditJpaRepository audits;
     private final EmployeeCreationRequestJpaRepository requests;
     private final JdbcTemplate database;
+    private final EmployeeVersionJpaRepository versions;
+    private final EmployeeJobJpaRepository jobs;
 
     EmployeeCreationPersistenceAdapter(EmployeeJpaRepository employees,
             EmploymentEpisodeJpaRepository episodes, EmployeeCreationAuditJpaRepository audits,
-            EmployeeCreationRequestJpaRepository requests, JdbcTemplate database) {
+            EmployeeCreationRequestJpaRepository requests, JdbcTemplate database,
+            EmployeeVersionJpaRepository versions,
+            EmployeeJobJpaRepository jobs) {
         this.employees = employees;
         this.episodes = episodes;
         this.audits = audits;
         this.requests = requests;
         this.database = database;
+        this.versions = versions;
+        this.jobs = jobs;
     }
 
     @Override
@@ -50,7 +61,9 @@ class EmployeeCreationPersistenceAdapter implements EmployeeCreationPort {
             var employee = employees.findByIdAndCompanyId(request.getEmployeeId(), companyId).orElseThrow();
             var episode = episodes.findByEmployeeIdAndCompanyId(employee.getId(), companyId).orElseThrow();
             return new CreationReceipt(employee.getId(), episode.getId(), request.getPayloadHash(),
-                    EmployeePersistenceMapper.facts(employee, episode));
+                    versions.findByCompanyIdAndEmployeeIdAndVersion(companyId, employee.getId(), 1)
+                            .map(EmployeeCorrectionPersistenceMapper::facts)
+                            .orElseGet(() -> EmployeePersistenceMapper.facts(employee, episode)));
         });
     }
 
@@ -64,6 +77,14 @@ class EmployeeCreationPersistenceAdapter implements EmployeeCreationPort {
                 facts.site(), facts.workEmail(), facts.workPhone(), recordedAt));
         episodes.save(new EmploymentEpisodeJpaEntity(episodeId, employeeId, companyId,
                 facts.startDate(), recordedAt));
+        var employee = employees.findByIdAndCompanyId(employeeId, companyId).orElseThrow();
+        var episode = episodes.findByEmployeeIdAndCompanyId(employeeId, companyId).orElseThrow();
+        versions.save(EmployeeCorrectionPersistenceMapper.snapshot(
+                employee, episode, facts, 1, 1, facts.startDate(), false, actor, null, correlationId, recordedAt, null, null));
+        if (facts.jobTitle() != null || facts.department() != null || facts.site() != null) {
+            jobs.save(new EmployeeJobJpaEntity(
+                    companyId, employeeId, episodeId, 1, facts.startDate(), facts.jobTitle(), facts.department(), facts.site()));
+        }
         audits.save(new EmployeeCreationAuditJpaEntity(UUID.randomUUID(), employeeId,
                 companyId, actor, correlationId, recordedAt));
         requests.save(new EmployeeCreationRequestJpaEntity(UUID.randomUUID(), companyId,
