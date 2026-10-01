@@ -58,6 +58,26 @@ class LocalDocumentationIntegrationTests {
             HttpResponse.BodyHandlers.ofString());
     }
 
+    @Test void accountLinkSwaggerAndPersistentSyntheticRelationshipAreAvailable() throws Exception {
+        var api = mapper.readTree(get("/v3/api-docs").body());
+        String path = "/api/v1/companies/{companyId}/employee-account-links/{membershipId}";
+        for (var operation : java.util.List.of(api.path("paths").path(path).path("get"),
+                api.path("paths").path(path + "/changes").path("post"),
+                api.path("paths").path("/api/v1/companies/{companyId}/my-employee-link").path("get"))) {
+            assertThat(operation.path("security").get(0).path("keycloak").get(0).asText()).isEqualTo("profile.read");
+        }
+        assertThat(api.path("components").path("schemas").path("ChangeEmployeeAccountLinkRequestDto")
+                .path("example").path("action").asText()).isEqualTo("REVOKE");
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        transaction.executeWithoutResult(status -> {
+            scope.apply(jdbc, "c0000000-0000-4000-8000-000000000021",
+                    java.util.UUID.fromString("c0000000-0000-4000-8000-000000000001"));
+            assertThat(jdbc.queryForObject("select employee_id from employment_account_link where membership_id = ?::uuid",
+                    java.util.UUID.class, "c0000000-0000-4000-8000-000000000020"))
+                    .isEqualTo(java.util.UUID.fromString("c0000000-0000-4000-8000-000000000070"));
+        });
+    }
+
     @Test void localCorrectionSwaggerAndPersistentBaselinesAreAvailable() throws Exception {
         var response = get("/v3/api-docs");
         assertThat(response.statusCode()).isEqualTo(200);

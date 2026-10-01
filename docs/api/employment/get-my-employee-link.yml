@@ -1,0 +1,16 @@
+get:
+  operationId: ownEmployeeAccountLink
+  description: Active company membership required. Resolves authenticated current active link only; grants no HR access.
+  security:
+    - keycloak: [profile.read]
+  parameters:
+    - {name: companyId, in: path, required: true, schema: {type: string, format: uuid}}
+  responses:
+    '200':
+      description: Current metadata or original confirmed receipt; Cache-Control no-store
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/MyEmployeeLinkResponseDto'}
+    '401': {description: Authentication required}
+    '403': {description: Current company authority required or self-link forbidden}
+    '404': {description: Target or own link unavailable in selected company}

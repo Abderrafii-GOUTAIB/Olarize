@@ -31,6 +31,10 @@ public class CurrentCompanyAccessService implements CompanyAccessUseCase, Compan
         return context(Membership.select(memberships.activeFor(subject.require()), requestedCompany));
     }
     @Override public String currentUserId() { return subject.require(); }
+    @Override public CompanyContext active(UUID requestedCompany) {
+        try { return resolve(requestedCompany); }
+        catch (CompanyAccessDenied denied) { throw new org.springframework.security.access.AccessDeniedException("Company access denied"); }
+    }
     @Override public CompanyContext require(UUID requestedCompany, String permission) {
         try {
             CompanyContext selected = resolve(requestedCompany);

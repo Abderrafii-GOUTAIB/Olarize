@@ -8,5 +8,6 @@ public interface CompanyAccessUseCase {
     List<CompanyContext> memberships();
     CompanyContext resolve(UUID requestedCompany);
     String currentUserId();
+    default CompanyContext active(UUID requestedCompany) { return resolve(requestedCompany); }
     CompanyContext require(UUID requestedCompany, String permission);
 }
